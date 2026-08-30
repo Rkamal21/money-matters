@@ -1,0 +1,117 @@
+.auth-container {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-primary);
+  padding: var(--space-md);
+  z-index: 1000;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--bg-secondary);
+  border: var(--border);
+  border-radius: var(--border-radius);
+  padding: var(--space-xl);
+  box-shadow: var(--shadow-md);
+}
+
+.auth-title {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-xs);
+  text-align: center;
+}
+
+.auth-subtitle {
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-lg);
+  text-align: center;
+}
+
+.auth-error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--border-radius-sm);
+  margin-bottom: var(--space-md);
+  font-size: var(--font-size-sm);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.auth-input {
+  width: 100%;
+  padding: var(--space-md);
+  background: var(--bg-primary);
+  border: var(--border);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.auth-input:focus {
+  border-color: var(--accent);
+}
+
+.auth-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.auth-button {
+  width: 100%;
+  padding: var(--space-md);
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--border-radius-sm);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  cursor: pointer;
+  transition: filter 0.2s;
+  margin-top: var(--space-sm);
+}
+
+.auth-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.auth-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.auth-switch {
+  margin-top: var(--space-lg);
+  text-align: center;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.auth-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  text-decoration: underline;
+  padding: 0;
+}
+
+.auth-link:hover {
+  color: var(--accent);
+  filter: brightness(1.2);
+}
