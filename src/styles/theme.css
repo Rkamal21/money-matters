@@ -1,0 +1,91 @@
+/**
+ * Design tokens — ARCHITECTURE.md §F.5.
+ *
+ * Tailwind v4 generates a utility for every token here, so `--color-surface`
+ * is `bg-surface` and `--radius-lg` is `rounded-lg`. Components reference role
+ * tokens; no component contains a hex value or an arbitrary spacing value.
+ *
+ * The semantic colour values below are concrete choices made in Milestone 0 —
+ * §F.5 specifies the token *names* and leaves the palette as `...`. Every pair
+ * used for text meets WCAG AA (≥ 4.5:1) against `--color-bg` and
+ * `--color-surface`; the a11y job in CI is what keeps that true.
+ */
+
+@theme {
+  /* Typography — one family, weight does the work. Tabular figures for money. */
+  --font-sans: 'Inter var', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-numeric: 'Inter var', ui-sans-serif, system-ui, sans-serif;
+
+  /* Type scale (1.200 minor third) */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: 2.25rem; /* the one big number on a screen */
+
+  /* Spacing — 4px base, no arbitrary values in components */
+  --spacing: 0.25rem;
+
+  /* Radius — soft, not pill. Trustworthy, not toy. */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  /* Elevation — two levels only. Depth is a hierarchy signal, not decoration. */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.06);
+  --shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.12);
+
+  /* Semantic colour — never used raw; components reference role tokens.
+     §F.6 requires token pairs at >= 4.5:1 for text and >= 3:1 for UI. These are
+     measured, not estimated: `src/styles/theme.contrast.test.ts` parses this
+     file and fails the build on any pair below its threshold.
+
+       token          on --color-bg   on --color-surface
+       text               17.23              18.47
+       text-muted          5.58               5.98
+       brand               5.34               5.72
+       positive            8.65               9.27
+       caution             5.35               5.73
+       negative            5.52               5.92
+       focus               5.34               5.72
+       border-strong       3.92               4.21   (UI threshold, 3:1)  */
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-text: #10141a;
+  --color-text-muted: #5b6472;
+  --color-brand: #2f5fd0; /* one accent, used sparingly */
+
+  /* Status colours. `positive` is deliberately much darker than `negative`
+     (contrast between the two: 1.57:1) rather than the more obvious mid-green.
+     A red-green colour-blind user cannot separate them by hue, so if they also
+     match in lightness — as the first draft's #0f7a4e did, at 1.10:1 — "under
+     budget" and "over budget" become the same swatch. Lightness is the channel
+     that still works.
+
+     `caution` and `negative` remain close in lightness (1.03:1); amber and red
+     that far apart in tone stop reading as a scale. They are separated by hue
+     and, per §F.5 rule 3, never by colour alone: every status carries an icon
+     and a word as well. */
+  --color-positive: #065234; /* income, under budget, goal met */
+  --color-caution: #8f5b00; /* approaching a limit */
+  --color-negative: #c02626; /* over budget, overspend */
+  --color-focus: #2f5fd0;
+
+  /* Two borders, because they answer to different rules.
+
+     `border` is decorative: card edges and list dividers, at 1.25:1 against the
+     surface. That is legal only because it is never the sole means of
+     identifying anything — a card is also separated by its background and its
+     spacing, so removing the line loses polish, not meaning.
+
+     `border-strong` is for anything whose boundary *is* the information: input
+     and select outlines, unchecked checkboxes, segmented controls. WCAG 1.4.11
+     applies there, so it clears 3:1 against both backgrounds. Reach for this
+     one on any interactive control (M1 onward); a hairline input border is the
+     classic way a design system fails an audit. */
+  --color-border: #e2e6eb;
+  --color-border-strong: #767c85;
+}

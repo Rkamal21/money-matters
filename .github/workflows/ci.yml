@@ -1,0 +1,176 @@
+name: CI
+
+# The pipeline from TESTING.md §8, one job per line of that diagram.
+# All green + 1 approval (2 for migrations, RLS, or domain/money) → squash merge.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+  # E2E and build need configuration to exist, not to be real. RLS is what
+  # protects data, and this project ref does not exist.
+  VITE_SUPABASE_URL: http://127.0.0.1:54321
+  VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1jaSIsInJvbGUiOiJhbm9uIn0.ci-not-a-real-signature
+
+jobs:
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+      # ARCHITECTURE.md §R.5: the SQL seed is authoritative. A slug changed in
+      # seed.sql without regenerating the constants stops here.
+      - run: npm run gen:categories -- --check
+
+  unit:
+    name: unit (${{ matrix.tz }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # TESTING.md §8: unit tests run in three timezones. Half of this
+        # project's date bugs are only visible from one side of UTC.
+        tz: [UTC, Asia/Kolkata, America/Los_Angeles]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run test:coverage
+        env:
+          TZ: ${{ matrix.tz }}
+      - uses: actions/upload-artifact@v4
+        if: matrix.tz == 'UTC'
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 7
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # Size budget (ARCHITECTURE.md §L) and the dist/ secret scan
+      # (SECURITY.md §8.3).
+      - run: node scripts/check-bundle.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  db:
+    name: db (migrations, schema assertions, RLS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      # `db reset` applies every migration to an empty database, in order, then
+      # runs seed.sql. A migration that only works against someone's local
+      # database fails here (DATABASE.md §13 rule 2).
+      - run: supabase start
+      - run: supabase db reset
+      # Includes the SECURITY.md §8.2 schema assertions, every one of them
+      # filtered to the `public` schema. Supabase's own `auth`, `storage` and
+      # `realtime` schemas ship FOR ALL policies and SECURITY DEFINER functions
+      # that we neither own nor may change, and an unfiltered assertion would
+      # fail the build on day one.
+      - run: npm run test:integration
+      - if: always()
+        run: supabase stop --no-backup
+
+  e2e:
+    name: e2e (shard ${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test --shard=${{ matrix.shard }}/3
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-${{ matrix.shard }}
+          path: playwright-report/
+          retention-days: 7
+
+  a11y:
+    name: a11y (axe)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # TESTING.md §7: axe over the key routes. At M0 there is one route; the
+      # grep widens as routes land, and a new violation fails the build.
+      - run: npx playwright test --grep "accessibility"
+
+  security:
+    name: security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      # SECURITY.md §8.3: a high-severity advisory fails the build. Do not
+      # lower this threshold to make a red build green — upgrade the package.
+      - run: npm audit --audit-level=high
+      - run: npm run build
+      - run: node scripts/check-bundle.mjs

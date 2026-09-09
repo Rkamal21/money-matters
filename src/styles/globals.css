@@ -1,0 +1,39 @@
+@import 'tailwindcss';
+@import './theme.css';
+
+/* Base element styles. Everything else is a utility on a component. */
+
+html {
+  color-scheme: light;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+}
+
+/* Money is always tabular so columns align and digits do not jitter (§F.5). */
+.tabular {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Never `outline: none` without a replacement — the focus ring is a token. */
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+/* Motion is functional. Transitions ≤ 200ms, and every one respects this (§F.5 rule 4). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
