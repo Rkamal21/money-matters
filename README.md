@@ -75,6 +75,22 @@ Verify the setup before writing code:
 npm run typecheck && npm run lint && npm test && npm run test:integration
 ```
 
+### Regenerating the lockfile
+
+Not with a bare `npm install`. npm seeds the resolution from whatever `node_modules/` it
+finds, so a lockfile regenerated in place on Windows records only Windows binaries and
+`npm ci` then fails on the Linux CI runner (`Missing: @emnapi/core from lock file`). Regenerate
+from `package.json` alone, on Linux, with no `node_modules` in sight:
+
+```bash
+mkdir -p /tmp/lockgen && cp package.json /tmp/lockgen/
+docker run --rm -v /tmp/lockgen:/work -w /work node:22 \n  npm install --package-lock-only --no-audit --ignore-scripts
+cp /tmp/lockgen/package-lock.json .
+```
+
+The result carries every platform (linux, win32, darwin, wasm), so `npm ci` works everywhere.
+Verify on both before pushing.
+
 **Never point local development at the production Supabase project.** A migration applied by
 accident is not reversible. `tests/integration/db.ts` refuses any host that is not local, but the
 `.env` file is on you.
