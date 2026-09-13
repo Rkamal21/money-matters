@@ -14,10 +14,6 @@ concurrency:
 
 env:
   NODE_VERSION: '22'
-  # E2E and build need configuration to exist, not to be real. RLS is what
-  # protects data, and this project ref does not exist.
-  VITE_SUPABASE_URL: http://127.0.0.1:54321
-  VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1jaSIsInJvbGUiOiJhbm9uIn0.ci-not-a-real-signature
 
 jobs:
   typecheck:
@@ -51,6 +47,11 @@ jobs:
   unit:
     name: unit (${{ matrix.tz }})
     runs-on: ubuntu-latest
+    # Compile-only: configuration must exist, not be real. The e2e and a11y jobs
+    # use a local Supabase and its real keys instead.
+    env:
+      VITE_SUPABASE_URL: http://127.0.0.1:54321
+      VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1jaSIsInJvbGUiOiJhbm9uIn0.ci-not-a-real-signature
     strategy:
       fail-fast: false
       matrix:
@@ -77,6 +78,11 @@ jobs:
   build:
     name: build
     runs-on: ubuntu-latest
+    # Compile-only: configuration must exist, not be real. The e2e and a11y jobs
+    # use a local Supabase and its real keys instead.
+    env:
+      VITE_SUPABASE_URL: http://127.0.0.1:54321
+      VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1jaSIsInJvbGUiOiJhbm9uIn0.ci-not-a-real-signature
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -85,8 +91,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      # Size budget (ARCHITECTURE.md §L) and the dist/ secret scan
-      # (SECURITY.md §8.3).
+      # Initial-load size budget (ARCHITECTURE.md §L) and the dist/ secret
+      # scan (SECURITY.md §8.3).
       - run: node scripts/check-bundle.mjs
       - uses: actions/upload-artifact@v4
         with:
@@ -112,11 +118,8 @@ jobs:
       # database fails here (DATABASE.md §13 rule 2).
       - run: supabase start
       - run: supabase db reset
-      # Includes the SECURITY.md §8.2 schema assertions, every one of them
-      # filtered to the `public` schema. Supabase's own `auth`, `storage` and
-      # `realtime` schemas ship FOR ALL policies and SECURITY DEFINER functions
-      # that we neither own nor may change, and an unfiltered assertion would
-      # fail the build on day one.
+      # The SECURITY.md §8.2 schema assertions (each filtered to `public`), the
+      # RLS isolation matrix (tests/rls) and the ledger invariants.
       - run: npm run test:integration
       - if: always()
         run: supabase stop --no-backup
@@ -135,6 +138,19 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: supabase start
+      # Migrations from zero, then seed.sql (which creates the demo user the
+      # accessibility and security specs sign in as).
+      - run: supabase db reset
+      - name: Point the build at the local stack
+        run: |
+          supabase status -o env \
+            | grep -E '^(API_URL|ANON_KEY)=' \
+            | sed -e 's/^API_URL=/VITE_SUPABASE_URL=/' -e 's/^ANON_KEY=/VITE_SUPABASE_ANON_KEY=/' -e 's/"//g' \
+            >> "$GITHUB_ENV"
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test --shard=${{ matrix.shard }}/3
       - uses: actions/upload-artifact@v4
@@ -143,6 +159,8 @@ jobs:
           name: playwright-report-${{ matrix.shard }}
           path: playwright-report/
           retention-days: 7
+      - if: always()
+        run: supabase stop --no-backup
 
   a11y:
     name: a11y (axe)
@@ -154,14 +172,32 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: supabase start
+      - run: supabase db reset
+      - name: Point the build at the local stack
+        run: |
+          supabase status -o env \
+            | grep -E '^(API_URL|ANON_KEY)=' \
+            | sed -e 's/^API_URL=/VITE_SUPABASE_URL=/' -e 's/^ANON_KEY=/VITE_SUPABASE_ANON_KEY=/' -e 's/"//g' \
+            >> "$GITHUB_ENV"
       - run: npx playwright install --with-deps chromium
-      # TESTING.md §7: axe over the key routes. At M0 there is one route; the
-      # grep widens as routes land, and a new violation fails the build.
+      # TESTING.md §7: axe over every key route, public and signed in, plus the
+      # add-transaction sheet. A new violation fails the build.
       - run: npx playwright test --grep "accessibility"
+      - if: always()
+        run: supabase stop --no-backup
 
   security:
     name: security
     runs-on: ubuntu-latest
+    # Compile-only: configuration must exist, not be real. The e2e and a11y jobs
+    # use a local Supabase and its real keys instead.
+    env:
+      VITE_SUPABASE_URL: http://127.0.0.1:54321
+      VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1jaSIsInJvbGUiOiJhbm9uIn0.ci-not-a-real-signature
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

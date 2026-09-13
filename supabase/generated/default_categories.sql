@@ -18,16 +18,16 @@
 --   (slug, name, kind, treatment, icon, color, position)
 
 -- >>> BEGIN GENERATED DEFAULT CATEGORIES
-  ('food', 'Food', 'expense', 'variable', 'circle', 'neutral', 1),
-  ('transport', 'Transport', 'expense', 'variable', 'circle', 'neutral', 2),
-  ('shopping', 'Shopping', 'expense', 'variable', 'circle', 'neutral', 3),
-  ('bills', 'Bills', 'expense', 'fixed', 'circle', 'neutral', 4),
-  ('entertainment', 'Entertainment', 'expense', 'variable', 'circle', 'neutral', 5),
-  ('healthcare', 'Healthcare', 'expense', 'variable', 'circle', 'neutral', 6),
-  ('education', 'Education', 'expense', 'variable', 'circle', 'neutral', 7),
-  ('travel', 'Travel', 'expense', 'variable', 'circle', 'neutral', 8),
-  ('personal', 'Personal', 'expense', 'variable', 'circle', 'neutral', 9),
+  ('food', 'Food', 'expense', 'variable', 'utensils', 'orange', 1),
+  ('transport', 'Transport', 'expense', 'variable', 'car', 'blue', 2),
+  ('shopping', 'Shopping', 'expense', 'variable', 'shopping-bag', 'pink', 3),
+  ('bills', 'Bills', 'expense', 'fixed', 'receipt', 'slate', 4),
+  ('entertainment', 'Entertainment', 'expense', 'variable', 'clapperboard', 'purple', 5),
+  ('healthcare', 'Healthcare', 'expense', 'variable', 'heart-pulse', 'red', 6),
+  ('education', 'Education', 'expense', 'variable', 'graduation-cap', 'teal', 7),
+  ('travel', 'Travel', 'expense', 'variable', 'plane', 'sky', 8),
+  ('personal', 'Personal', 'expense', 'variable', 'user', 'amber', 9),
   ('other', 'Other', 'expense', 'variable', 'circle', 'neutral', 10),
-  ('salary', 'Salary', 'income', 'variable', 'circle', 'neutral', 11),
-  ('other_income', 'Other Income', 'income', 'variable', 'circle', 'neutral', 12)
+  ('salary', 'Salary', 'income', 'variable', 'briefcase', 'green', 11),
+  ('other_income', 'Other Income', 'income', 'variable', 'circle-plus', 'emerald', 12)
 -- <<< END GENERATED DEFAULT CATEGORIES

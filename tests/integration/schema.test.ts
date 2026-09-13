@@ -53,7 +53,6 @@ describe('migrations applied from zero', () => {
       'account_type',
       'category_kind',
       'category_treatment',
-      'contribution_source',
       'gamification_event_type',
       'match_type',
       'transaction_kind',
@@ -73,12 +72,82 @@ describe('migrations applied from zero', () => {
     expect(row?.labels).not.toContain('regex')
   })
 
-  it('created no tables yet, because M0 provisions the database and nothing more', async () => {
+  it('created the fourteen tables of DATABASE.md §6', async () => {
     const rows = await sql<{ relname: string }[]>`
       select c.relname
         from pg_class c
         join pg_namespace n on n.oid = c.relnamespace
        where n.nspname = 'public' and c.relkind = 'r'
+       order by c.relname
+    `
+
+    expect(rows.map((row) => row.relname)).toEqual([
+      'accounts',
+      'achievements',
+      'audit_log',
+      'budget_category_limits',
+      'budget_periods',
+      'categories',
+      'gamification_events',
+      'gamification_profiles',
+      'goals',
+      'merchant_rules',
+      'profiles',
+      'transaction_splits',
+      'transactions',
+      'user_achievements',
+    ])
+  })
+
+  it('created the four derived views of DATABASE.md §8', async () => {
+    const rows = await sql<{ relname: string }[]>`
+      select c.relname
+        from pg_class c
+        join pg_namespace n on n.oid = c.relnamespace
+       where n.nspname = 'public' and c.relkind = 'v'
+       order by c.relname
+    `
+
+    expect(rows.map((row) => row.relname)).toEqual([
+      'account_balances',
+      'account_entries',
+      'goal_progress',
+      'transaction_category_amounts',
+    ])
+  })
+
+  it('stores no amount as a float, a double or the locale-bound money type (P4)', async () => {
+    const rows = await sql<{ column: string }[]>`
+      select c.relname || '.' || a.attname as column
+        from pg_attribute a
+        join pg_class c on c.oid = a.attrelid
+        join pg_namespace n on n.oid = c.relnamespace
+       where n.nspname = 'public' and c.relkind = 'r' and a.attnum > 0 and not a.attisdropped
+         and format_type(a.atttypid, a.atttypmod) in ('real', 'double precision', 'money')
+    `
+
+    expect(rows).toEqual([])
+  })
+
+  it('stores every *_minor column as bigint', async () => {
+    const rows = await sql<{ column: string; type: string }[]>`
+      select c.relname || '.' || a.attname as column, format_type(a.atttypid, a.atttypmod) as type
+        from pg_attribute a
+        join pg_class c on c.oid = a.attrelid
+        join pg_namespace n on n.oid = c.relnamespace
+       where n.nspname = 'public' and c.relkind = 'r' and a.attnum > 0 and not a.attisdropped
+         and a.attname like '%\_minor' escape '\\'
+         and format_type(a.atttypid, a.atttypmod) <> 'bigint'
+    `
+
+    expect(rows).toEqual([])
+  })
+
+  it('grants nothing on any application table to anon', async () => {
+    const rows = await sql<{ table_name: string }[]>`
+      select distinct table_name
+        from information_schema.role_table_grants
+       where table_schema = 'public' and grantee = 'anon'
     `
 
     expect(rows).toEqual([])
@@ -180,7 +249,7 @@ describe('SECURITY.md §8.2 schema assertions (public schema only)', () => {
         join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'public' and not p.prosecdef
          and p.proname in (
-           'sync_goal_saved', 'enforce_split_total', 'award_xp',
+           'enforce_split_total', 'award_xp',
            'audit_row', 'handle_new_user', 'evaluate_achievements'
          )
     `

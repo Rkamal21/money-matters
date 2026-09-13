@@ -6,12 +6,15 @@
 html {
   color-scheme: light;
   -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
   background-color: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Money is always tabular so columns align and digits do not jitter (§F.5). */
@@ -26,6 +29,12 @@ body {
   outline-offset: 2px;
 }
 
+/* The route announcer moves focus to each page's heading; the heading itself
+   does not need a ring, the reader already hears it. */
+h1:focus {
+  outline: none;
+}
+
 /* Motion is functional. Transitions ≤ 200ms, and every one respects this (§F.5 rule 4). */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -36,4 +45,20 @@ body {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* The ₹ splash — v1's one piece of motion worth keeping, now reduced-motion safe. */
+@keyframes mm-splash-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.mm-splash-mark {
+  animation: mm-splash-in 180ms ease-out both;
 }

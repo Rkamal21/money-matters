@@ -5,7 +5,11 @@
  * Two things, both from documents that already decided them:
  *
  *   1. **Size budget** — ARCHITECTURE.md §L: "Initial JS bundle < 200 KB
- *      gzipped. CI size check, fails the build."
+ *      gzipped", with charts and analytics lazy-loaded (ROADMAP.md M10). The
+ *      initial bundle is what `index.html` loads before the first render: its
+ *      entry script and every `modulepreload`. Route chunks load when their
+ *      route does, so each gets its own, looser ceiling instead — a lazy chunk
+ *      that grows past it is a dependency that should not be there.
  *   2. **Secret scan** — SECURITY.md §8.3: the built `dist/` contains no
  *      `service_role`, no JWT with `"role":"service_role"`, and no key not on
  *      the `VITE_` allow-list.
@@ -14,20 +18,28 @@
  * variable into the bundle, so a developer who adds `VITE_ADMIN_KEY` to `.env`
  * publishes it to every visitor. The allow-list in `src/config/env.schema.ts`
  * is the declared set; anything else that looks like a credential fails here.
+ *
+ * Source maps are scanned too, with one distinction: a map embeds the source
+ * text of every module, including third-party libraries, and the Supabase SDK
+ * documents its admin API with sentences like "never expose your service_role
+ * key in the browser". A vendor's comment is not our secret. Our own sources
+ * inside a map, and every emitted .js/.css/.html file, are scanned in full.
  */
 import { gzipSync } from 'node:zlib'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, relative, extname } from 'node:path'
-import { dirname } from 'node:path'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { basename, dirname, extname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = join(ROOT, 'dist')
 
 /** ARCHITECTURE.md §L. Gzipped, because that is what crosses the wire. */
-const JS_BUDGET_BYTES = 200 * 1024
+const INITIAL_BUDGET_BYTES = 200 * 1024
+/** Any one lazily loaded chunk. */
+const LAZY_CHUNK_BUDGET_BYTES = 120 * 1024
 
 const problems = []
+const kb = (bytes) => `${(bytes / 1024).toFixed(1)} KB`
 
 function walk(dir) {
   const out = []
@@ -39,24 +51,41 @@ function walk(dir) {
   return out
 }
 
-let files
-try {
-  files = walk(DIST)
-} catch {
+if (!existsSync(DIST)) {
   process.stderr.write('check-bundle: dist/ does not exist. Run `npm run build` first.\n')
   process.exit(1)
 }
+const files = walk(DIST)
 
 // ---------------------------------------------------------------- size budget
 
+const gz = (file) => gzipSync(readFileSync(file)).length
 const jsFiles = files.filter((file) => extname(file) === '.js')
-const gzippedTotal = jsFiles.reduce((total, file) => total + gzipSync(readFileSync(file)).length, 0)
 
-const kb = (bytes) => `${(bytes / 1024).toFixed(1)} KB`
+const html = readFileSync(join(DIST, 'index.html'), 'utf8')
+const initialNames = new Set(
+  [...html.matchAll(/(?:src|href)="\/?(assets\/[^"]+\.js)"/g)].map((match) => basename(match[1])),
+)
+if (initialNames.size === 0)
+  problems.push('dist/index.html references no JavaScript; the build is broken.')
 
-if (gzippedTotal > JS_BUDGET_BYTES) {
+let initialBytes = 0
+let totalBytes = 0
+for (const file of jsFiles) {
+  const size = gz(file)
+  totalBytes += size
+  if (initialNames.has(basename(file))) {
+    initialBytes += size
+  } else if (size > LAZY_CHUNK_BUDGET_BYTES) {
+    problems.push(
+      `${relative(ROOT, file)} is ${kb(size)} gzipped, over the ${kb(LAZY_CHUNK_BUDGET_BYTES)} ceiling for one lazy chunk.`,
+    )
+  }
+}
+
+if (initialBytes > INITIAL_BUDGET_BYTES) {
   problems.push(
-    `JS bundle is ${kb(gzippedTotal)} gzipped, over the ${kb(JS_BUDGET_BYTES)} budget ` +
+    `The initial JS bundle is ${kb(initialBytes)} gzipped, over the ${kb(INITIAL_BUDGET_BYTES)} budget ` +
       '(ARCHITECTURE.md §L).',
   )
 }
@@ -90,17 +119,28 @@ function jwtClaimsServiceRole(source) {
   return false
 }
 
-for (const file of files) {
-  if (!['.js', '.css', '.html', '.map'].includes(extname(file))) continue
-  const source = readFileSync(file, 'utf8')
-  const name = relative(ROOT, file)
-
+function scan(name, source) {
   for (const { pattern, why } of FORBIDDEN) {
     if (pattern.test(source)) problems.push(`${name} contains ${why} (SECURITY.md §8.3).`)
   }
-
   if (jwtClaimsServiceRole(source)) {
     problems.push(`${name} contains a JWT with "role":"service_role" (SECURITY.md §8.3).`)
+  }
+}
+
+for (const file of files) {
+  const extension = extname(file)
+  const name = relative(ROOT, file)
+  if (['.js', '.css', '.html'].includes(extension)) {
+    scan(name, readFileSync(file, 'utf8'))
+  } else if (extension === '.map') {
+    const map = JSON.parse(readFileSync(file, 'utf8'))
+    const sources = map.sources ?? []
+    const contents = map.sourcesContent ?? []
+    sources.forEach((source, index) => {
+      if (/node_modules/.test(source)) return
+      scan(`${name} (${source})`, contents[index] ?? '')
+    })
   }
 }
 
@@ -113,6 +153,7 @@ if (problems.length > 0) {
 }
 
 process.stdout.write(
-  `check-bundle: ${jsFiles.length} JS file(s), ${kb(gzippedTotal)} gzipped ` +
-    `(budget ${kb(JS_BUDGET_BYTES)}); no forbidden material found\n`,
+  `check-bundle: initial load ${kb(initialBytes)} gzipped across ${initialNames.size} file(s) ` +
+    `(budget ${kb(INITIAL_BUDGET_BYTES)}); ${jsFiles.length} JS files, ${kb(totalBytes)} in all; ` +
+    'no forbidden material found\n',
 )

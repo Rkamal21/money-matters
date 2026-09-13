@@ -45,7 +45,8 @@ create type public.transaction_status as enum (
 -- 'regex' is deliberately absent: ADR-0022.
 create type public.match_type as enum ('contains', 'prefix', 'exact');
 
-create type public.contribution_source as enum ('manual', 'transfer', 'auto_rule', 'system');
+-- No `contribution_source`: goals have no contribution ledger. A contribution is a
+-- transfer into the goal's wallet, recorded in `transactions` (ADR-0026).
 
 create type public.gamification_event_type as enum (
   'transaction_logged',

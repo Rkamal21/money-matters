@@ -1,8 +1,7 @@
-import * as Sentry from '@sentry/react'
-
 import { IS_DEV } from '@/config/env'
 
 import { scrubData } from './scrubEvent'
+import { addBreadcrumb } from './sink'
 
 /**
  * Structured logging (ARCHITECTURE.md §K).
@@ -25,7 +24,7 @@ const SENTRY_LEVEL = { info: 'info', warn: 'warning', error: 'error' } as const
 function emit(level: LogLevel, event: string, fields: LogFields): void {
   const data = scrubData(fields)
 
-  Sentry.addBreadcrumb({
+  addBreadcrumb({
     category: 'app',
     level: SENTRY_LEVEL[level],
     message: event,

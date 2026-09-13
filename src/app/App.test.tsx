@@ -4,30 +4,49 @@ import { describe, expect, it } from 'vitest'
 import { App } from './App'
 
 /**
- * The Milestone 0 component test. It proves the RTL harness end to end: JSX
- * compiles, jsdom renders, the Tailwind-classed tree mounts, and the queries
- * used throughout the rest of the project work.
+ * The composition root, rendered whole. With no stored session the auth
+ * provider resolves to "signed out" without a network call, the guard sends
+ * the visitor to sign-in, and the lazily loaded page renders — which proves
+ * providers, router, guards and code splitting work together.
  *
- * Queries are by role and accessible name on purpose (TESTING.md §5): a test
- * that passes is then evidence the markup is reachable by a screen reader, not
- * just that a div exists.
+ * Queries are by role and accessible name (TESTING.md §5).
  */
 describe('App', () => {
-  it('renders a single top-level heading naming the product', () => {
+  it('sends a signed-out visitor to sign in', async () => {
     render(<App />)
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Money Matters' })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Welcome back' }),
+    ).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/login')
   })
 
-  it('exposes the shell as a main landmark', () => {
+  it('stays on the sign-in page — no redirect loop through the sheet routes', async () => {
+    window.history.replaceState(null, '', '/login')
     render(<App />)
 
-    expect(screen.getByRole('main')).toBeInTheDocument()
+    await screen.findByRole('heading', { level: 1, name: 'Welcome back' })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(window.location.search).not.toContain('returnTo=%2Flogin')
   })
 
-  it('labels the status region by its own heading', () => {
+  it('offers the way to create an account and to recover a password', async () => {
     render(<App />)
 
-    expect(screen.getByRole('region', { name: 'Foundation ready' })).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: 'Create an account' })).toHaveAttribute(
+      'href',
+      '/signup',
+    )
+    expect(screen.getByRole('link', { name: 'Forgot your password?' })).toHaveAttribute(
+      'href',
+      '/reset-password',
+    )
+  })
+
+  it('labels every field of the sign-in form', async () => {
+    render(<App />)
+
+    expect(await screen.findByLabelText('Email')).toHaveAttribute('type', 'email')
+    expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'password')
   })
 })

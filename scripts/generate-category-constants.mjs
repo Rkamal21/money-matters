@@ -42,6 +42,20 @@ const END_MARKER = '<<< END DEFAULT CATEGORIES'
 const SQL_BEGIN_MARKER = '>>> BEGIN GENERATED DEFAULT CATEGORIES'
 const SQL_END_MARKER = '<<< END GENERATED DEFAULT CATEGORIES'
 
+/**
+ * System merchant rules name categories by slug, legitimately and many times
+ * over, which the "writes its own category list" heuristic below would
+ * misread as a second list. So the rules block is exempt from that heuristic —
+ * and held to a stricter rule instead: every slug in it must be a default
+ * category, or a rule would point at a category no user has.
+ */
+const MERCHANT_BEGIN_MARKER = '>>> BEGIN SYSTEM MERCHANT RULES'
+const MERCHANT_END_MARKER = '<<< END SYSTEM MERCHANT RULES'
+
+/** One rule: ('pattern', 'match_type', 'Label', 'slug', confidence) */
+const MERCHANT_ROW =
+  /^\(\s*'((?:[^']|'')+)'\s*,\s*'(contains|prefix|exact)'\s*,\s*'((?:[^']|'')+)'\s*,\s*'([a-z0-9_]{1,40})'\s*,\s*([01](?:\.\d+)?)\s*\),?$/
+
 /** One row: ('slug', 'Name', 'kind', 'treatment', 'icon', 'color', position) */
 const ROW =
   /^\(\s*'([a-z0-9_]{1,40})'\s*,\s*'([^']+)'\s*,\s*'(expense|income)'\s*,\s*'(fixed|variable|excluded)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*,\s*(\d+)\s*\),?$/
@@ -217,11 +231,31 @@ function checkMigrations(categories) {
       }
     }
 
-    const outsideBlocks =
+    let outsideBlocks =
       marked === null
         ? sql
         : sql.slice(0, sql.indexOf(SQL_BEGIN_MARKER)) +
           sql.slice(sql.indexOf(SQL_END_MARKER) + SQL_END_MARKER.length)
+
+    const rules = extractBlock(outsideBlocks, MERCHANT_BEGIN_MARKER, MERCHANT_END_MARKER)
+    if (rules !== null) {
+      for (const rawLine of rules.split('\n')) {
+        const line = rawLine.trim()
+        if (line === '' || line.startsWith('--')) continue
+        const match = MERCHANT_ROW.exec(line)
+        if (!match) {
+          problems.push(`supabase/migrations/${file}: unparseable merchant rule:\n    ${line}`)
+        } else if (!slugs.includes(match[4])) {
+          problems.push(
+            `supabase/migrations/${file}: merchant rule "${match[1]}" names category ` +
+              `"${match[4]}", which is not a default category slug.`,
+          )
+        }
+      }
+      outsideBlocks =
+        outsideBlocks.slice(0, outsideBlocks.indexOf(MERCHANT_BEGIN_MARKER)) +
+        outsideBlocks.slice(outsideBlocks.indexOf(MERCHANT_END_MARKER) + MERCHANT_END_MARKER.length)
+    }
 
     const found = slugs.filter((slug) => outsideBlocks.includes(`'${slug}'`))
     if (found.length >= 3) {

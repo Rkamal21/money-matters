@@ -32,10 +32,16 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@hookform/resolvers": "^5.9.1",
+    "@radix-ui/react-dialog": "^1.1.23",
     "@sentry/react": "^8.55.0",
     "@supabase/supabase-js": "^2.97.0",
+    "@tanstack/react-query": "^5.102.8",
+    "lucide-react": "^1.45.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-hook-form": "^7.88.0",
+    "react-router": "^7.18.3",
     "zod": "^3.24.2"
   },
   "devDependencies": {
