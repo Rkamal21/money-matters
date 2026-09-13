@@ -153,21 +153,22 @@ createTransaction(input: unknown, deps): Promise<Result<Transaction, AppError>>
 
 ### 2.7 `GoalService`
 
-| Operation | Input | Output | Errors |
-|---|---|---|---|
-| `listGoals` | `{ includeArchived? }` | `GoalWithProgress[]` | `data_access` |
-| `createGoal` | `{ name, target, targetDate?, linkedAccountId?, priority? }` | `Goal` | `validation` (target ≤ 0, target date in the past) |
-| `createGoal` (see above) | | | also `authorization` — sending `saved` or `achievedAt` at creation is `42501`, the insert-side half of the same control ([ADR-0019](./adr/0019-insert-column-grants.md)) |
-| `updateGoal` | `{ id, patch, expectedUpdatedAt }` | `Goal` | `validation`, `not_found`, `conflict`, `authorization` (any attempt to set `saved` or `achievedAt` → `42501`) |
-| `archiveGoal` | `{ id }` | `Goal` | `not_found` |
-| `addContribution` | `{ goalId, amount, occurredOn, note?, clientRequestId }` | `GoalContribution` | `validation` (zero amount; withdrawal exceeding the saved total), `not_found` (**same error whether the goal is missing or belongs to someone else**), `conflict` (duplicate `clientRequestId`) | **RPC** `add_goal_contribution` |
-| `listContributions` | `{ goalId, cursor? }` | `Page<GoalContribution>` | `not_found` |
-| `deleteContribution` | `{ id }` | `void` | `not_found` | trigger recomputes the goal total |
+A goal is the *purpose* of money in one wallet; its progress is that wallet's balance
+([ADR-0026](./adr/0026-goals-are-the-purpose-of-a-wallet.md)).
 
-**There is no `setGoalAmount`, by design.** Progress changes only by writing to the ledger. This is
-the single API-shape decision that closes v1's "set your own savings balance" hole — and it is
-enforced by column grants on `INSERT` and `UPDATE` alike, so the absence of the method is a
-convenience for us, not the control.
+| Operation | Input | Output | Errors | Notes |
+|---|---|---|---|---|
+| `listGoals` | `{ includeArchived? }` | `GoalWithProgress[]` | `data_access` | read from the `goal_progress` view — balance, `reached`, `reachedOn` |
+| `createGoal` | `{ name, target, walletAccountId, targetDate?, priority? }` | `Goal` | `validation` (target ≤ 0, target date in the past, **account is not the user's wallet** → `23503`), `conflict` (**wallet already backs a goal** → `23505`) | the form may first `createAccount({ type: 'wallet' })`; if the goal write then fails, the empty wallet remains and the form retries against it |
+| `updateGoal` | `{ id, patch, expectedUpdatedAt }` | `Goal` | `validation`, `not_found`, `conflict`, `authorization` (changing `walletAccountId` → `42501`; it is insert-only) | |
+| `archiveGoal` | `{ id }` | `Goal` | `not_found` | the wallet and its money are untouched |
+| `listGoalActivity` | `{ goalId, cursor? }` | `Page<Transaction>` | `not_found` | `listTransactions` filtered to the goal's wallet — the activity *is* the wallet's ledger |
+| `contributeToGoal` | `{ goalId, amount, fromAccountId, occurredOn, clientRequestId }` | `Transaction` | as `createTransaction` | `createTransaction({ kind: 'transfer', accountId: fromAccountId, counterAccountId: <goal's wallet> })`. Withdrawing is the reverse transfer |
+
+**There is no `setGoalAmount` and no `addContribution`, by design.** A goal stores no amount, so
+there is nothing for a client to set, and progress moves only when money moves between accounts.
+That closes v1's "set your own savings balance" hole structurally rather than with a grant: the
+column it would need does not exist.
 
 ### 2.8 `GamificationService`
 
@@ -272,14 +273,14 @@ Full list: `ProfileRepository`, `AccountRepository`, `CategoryRepository`, `Tran
 
 All are `SECURITY DEFINER` with `SET search_path = ''` and `REVOKE … FROM public, anon`.
 
-The **client-callable** ones — everything in this section except `recompute_goal_totals` — carry
+The **client-callable** ones — everything in this section except `recompute_xp_totals` — carry
 `GRANT EXECUTE … TO authenticated` and derive the caller from `auth.uid()`. They never take a user
 id; a `p_user_id` parameter on a function `authenticated` can execute is a privilege-escalation
 hole, and CI asserts none exists ([SECURITY.md §4.5 rule 2, §8.2](./SECURITY.md)).
 
-`recompute_goal_totals` and `recompute_xp_totals` are **maintenance** functions: no grant to
-`authenticated`, reachable only with `service_role`, and they take an optional `p_user_id` because
-an operator repairing one user's totals is exactly the case they exist for.
+`recompute_xp_totals` is a **maintenance** function: no grant to `authenticated`, reachable only
+with `service_role`, and it takes an optional `p_user_id` because an operator repairing one user's
+total is exactly the case it exists for.
 `evaluate_achievements(p_user_id)` is **internal**: no grant at all, called only from inside
 another definer function that has already derived the caller.
 
@@ -287,22 +288,8 @@ Every definer function here is owned by a role holding `BYPASSRLS`. That is not 
 definer function whose owner lacks it reads an RLS-filtered ledger and writes a silently wrong
 total, with no error. See [ADR-0020](./adr/0020-rls-execution-model.md).
 
-### `add_goal_contribution`
-
-```sql
-add_goal_contribution(
-  p_goal_id uuid, p_amount_minor bigint, p_occurred_on date,
-  p_note text default null, p_client_request_id uuid default null
-) returns public.goal_contributions
-```
-
-| Aspect | Contract |
-|---|---|
-| **Authorization** | `auth.uid()` must own the goal. Not-found and not-yours return the **same** `P0002 goal_not_found`, so the function is not an existence oracle for other users' ids. |
-| **Validation** | `p_amount_minor <> 0`; a withdrawal may not exceed the current saved total; `p_occurred_on` within the allowed window. |
-| **Atomicity** | One transaction: lock the goal `FOR UPDATE` → insert the contribution → recompute `saved_minor` → set `achieved_at` if the target is reached → `award_xp('goal_contribution')` → `evaluate_achievements` → audit. |
-| **Idempotency** | `UNIQUE (user_id, client_request_id)`; a repeat returns the existing row rather than double-counting. |
-| **Errors** | `28000 not_authenticated`, `P0002 goal_not_found`, `23514 invalid_amount`, `23505 duplicate_request`, `P0001 withdrawal_exceeds_balance` |
+There is **no goal RPC**. A contribution is a transfer written through PostgREST like any other
+transaction; its XP comes from the transaction trigger ([ADR-0026](./adr/0026-goals-are-the-purpose-of-a-wallet.md)).
 
 ### `ensure_budget_period`
 
@@ -361,18 +348,16 @@ record_transaction_review(p_transaction_id uuid, p_decision text) returns public
 `p_decision ∈ {confirm, reject, duplicate}`. Moves an ingested row out of `pending_review`, records
 the decision for parser feedback, and awards XP only on `confirm`.
 
-### `recompute_goal_totals` *(maintenance)*
+### `recompute_xp_totals` *(maintenance)*
 
 ```sql
-recompute_goal_totals(p_user_id uuid default null) returns integer
-recompute_xp_totals(p_user_id uuid default null)  returns integer
+recompute_xp_totals(p_user_id uuid default null) returns integer
 ```
 
-Rebuild `goals.saved_minor` from the contribution ledger, and
-`gamification_profiles.xp_total` from `gamification_events`. The documented recovery paths for the
-system's two caches — symmetric by design, because a gamification rule that turns out to be wrong
-is a *when*, not an *if* ([ARCHITECTURE.md §P, R7](./ARCHITECTURE.md)). Neither is granted to
-`authenticated`.
+Rebuilds `gamification_profiles.xp_total` from `gamification_events` — the documented recovery path
+for the system's one cache, because a gamification rule that turns out to be wrong is a *when*, not
+an *if* ([ARCHITECTURE.md §P, R7](./ARCHITECTURE.md)). Not granted to `authenticated`. Goal progress
+needs no counterpart: it is derived from `transactions` on every read.
 
 ---
 
@@ -403,10 +388,10 @@ export interface AppError {
 | PG `23514` check violation | `validation` (constraint name → code) | `transaction.amount_positive` |
 | PG `23503` FK violation | `validation` | `transaction.unknown_category` |
 | PG `23P01` exclusion violation | `conflict` | `budget.period_overlap` |
-| PG `42501` insufficient privilege | `authorization` | `goal.saved_not_writable` |
+| PG `42501` insufficient privilege | `authorization` | `goal.wallet_not_writable` |
 | PostgREST `PGRST301` (JWT expired) | `authentication` | `auth.session_expired` |
 | PostgREST `PGRST116` (no rows) | `not_found` | `transaction.not_found` |
-| PG `P0002` from an RPC | `not_found` | `goal.not_found` |
+| PG `P0002` from an RPC | `not_found` | `transaction.not_found` |
 | PG `P0001` custom raise | `validation` | mapped from the raised message key |
 | GoTrue `invalid_credentials` | `authentication` | `auth.invalid_credentials` |
 | GoTrue `over_request_rate_limit` | `rate_limited` | `auth.rate_limited` |
@@ -432,7 +417,7 @@ with a raw Postgres message as its user-facing text.
 | `data_access` / `unexpected` | Error boundary, Sentry report, correlation id shown for support |
 
 **The rule that matters:** a `PostgrestError.message` never reaches a rendered string. Database
-messages leak schema (`column "saved_minor" of relation "goals"`), constraint names, and sometimes
+messages leak schema (`column "xp_total" of relation "gamification_profiles"`), constraint names, and sometimes
 row contents. `userMessage` is written by us, per `code`, in language a person understands.
 
 ### 5.3 Error flow
@@ -459,5 +444,5 @@ PostgreSQL raises 23514 tx_amount_positive_check
 | A public/partner REST API | No consumer exists. Adding one now means designing versioning, keys, and rate limits for nobody. |
 | A GraphQL layer | One client, one schema, no over-fetching problem that keyset pagination and RPCs do not already solve. |
 | A Node/Express CRUD tier in front of Supabase | It would duplicate the authorization rules RLS already enforces, in a second place that can disagree — and add a deployment and ~80 ms per call. Edge Functions cover the only genuine need (server-held secrets). |
-| Client-callable XP, balance, or goal-total mutations | The entire point of §2.7 and §2.8. |
+| Client-callable XP, balance, or goal-progress mutations | The entire point of §2.7 and §2.8. Balances and goal progress move only through `transactions`. |
 | Webhooks | Nothing subscribes yet. |

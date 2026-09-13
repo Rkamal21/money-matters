@@ -90,7 +90,7 @@ existing session, not a second identity).
 ### 4.1 The template
 
 Applied identically to `accounts`, `categories`, `transactions`, `transaction_splits`,
-`budget_periods`, `budget_category_limits`, `goals`, and `goal_contributions`:
+`budget_periods`, `budget_category_limits`, and `goals`:
 
 ```sql
 alter table public.transactions enable row level security;
@@ -176,8 +176,7 @@ than an interpretation.
 | `transaction_splits` | own | own; column grants exclude `id`, `created_at`, `updated_at` | own | own |
 | `budget_periods` | own | own; column grants exclude `id`, `created_at`, `updated_at` | own **and `closed_at IS NULL`** | own **and `closed_at IS NULL`** |
 | `budget_category_limits` | own | own **and parent period open**; column grants exclude `id`, `created_at`, `updated_at` | own and parent open | own and parent open |
-| `goals` | own | own; column grants exclude `saved_minor`, `achieved_at` | own; column grants exclude `saved_minor`, `achieved_at`, `user_id` | own (cascades contributions) |
-| `goal_contributions` | own | ✗ **— RPC only** | ✗ | own (allows correcting a mistake; the trigger recomputes the total) |
+| `goals` | own | own; column grants exclude `wallet_account_type`; the type-pinned composite FK admits only the user's own wallet | own; column grants exclude `wallet_account_id`, `wallet_account_type`, `user_id` | own (the wallet and its money are untouched) |
 | `gamification_profiles` | own | ✗ | ✗ | ✗ |
 | `gamification_events` | own | ✗ | ✗ | ✗ |
 | `user_achievements` | own | ✗ | ✗ | ✗ |
@@ -204,44 +203,46 @@ history), while writes must stop.
 ### 4.4 Column-level grants: where RLS runs out
 
 RLS answers "is this row mine?" It cannot answer "may I change *this column* of my own row?"
-For `goals.saved_minor` and `gamification_profiles.xp_total` the row **is** the user's — RLS will
-happily allow the update. The control is the grant:
+For `gamification_profiles.xp_total` the row **is** the user's — RLS will happily allow the update.
+The control is the grant:
 
 ```sql
-revoke insert, update on public.goals from authenticated;
-grant  insert (user_id, name, target_minor, currency_code, target_date,
-               linked_account_id, priority)
-       on public.goals to authenticated;
-grant  update (name, target_minor, target_date, linked_account_id, priority, archived_at)
-       on public.goals to authenticated;
--- saved_minor and achieved_at are absent from BOTH grants ⇒ PostgreSQL rejects any INSERT or
--- UPDATE naming them with 42501 insufficient_privilege, before RLS is even consulted. On insert
--- they take their DEFAULTs (0 and NULL), which is verified behaviour, not an assumption.
-
 revoke insert, update, delete on public.gamification_profiles from authenticated;
 grant  select on public.gamification_profiles to authenticated;
+
+revoke insert, update on public.goals from authenticated;
+grant  insert (user_id, wallet_account_id, name, target_minor, target_date, priority)
+       on public.goals to authenticated;
+grant  update (name, target_minor, target_date, priority, archived_at)
+       on public.goals to authenticated;
+-- wallet_account_id is insert-only: re-pointing a goal at a fuller wallet would complete it
+-- with no money moving. wallet_account_type is in neither grant, so it always takes its
+-- DEFAULT 'wallet' — which is what makes the type-pinned FK mean "must be a wallet".
 ```
 
-`UPDATE goals SET saved_minor = 5000000` fails for every user, including the row's owner — and so
-does `INSERT INTO goals (…, saved_minor) VALUES (…, 5000000)`. **The insert half is not optional.**
-`sync_goal_saved()` fires on `goal_contributions`, not on `goals`, so a goal created with a
-fabricated total is never recomputed and stays wrong forever. An earlier draft of this document
-column-scoped `UPDATE` only, which left the whole control bypassable at row creation.
+`UPDATE gamification_profiles SET xp_total = 999999` fails for every user, including the row's
+owner, with `42501` before RLS is consulted. Wherever a protected column sits on a table the client
+*can* insert into (`categories.is_system`, `transactions.status`), it is absent from the `INSERT`
+grant too — **the insert half is not optional**, or a row can be born with the forged value
+([ADR-0019](./adr/0019-insert-column-grants.md)).
 
-This is the single most important control in the gamification and goals design, and it is six
-lines of DDL. See [ADR-0019](./adr/0019-insert-column-grants.md).
+**Goals have nothing to forge.** An earlier design stored `goals.saved_minor` and needed exactly
+this control, on both halves, to stop a goal being born or edited complete. Goals now store no
+amount: progress is the backing wallet's balance, which moves only through `transactions` and every
+control on them ([ADR-0026](./adr/0026-goals-are-the-purpose-of-a-wallet.md)). What remains is
+structural — the type-pinned composite FK admits only the user's own wallet, and the wallet cannot
+be swapped after creation.
 
 ### 4.5 `SECURITY DEFINER` hygiene
 
 Every definer function follows this shape:
 
 ```sql
-create or replace function public.add_goal_contribution(
-  p_goal_id uuid, p_amount_minor bigint, p_occurred_on date,
-  p_note text default null, p_client_request_id uuid default null)
-returns public.goal_contributions
+create or replace function public.record_transaction_review(
+  p_transaction_id uuid, p_decision text)
+returns public.transactions
 language plpgsql
-security definer
+security definer                           -- writes `status`, which the client cannot
 set search_path = ''                       -- no schema hijack
 as $$
 declare v_user uuid := auth.uid(); ...
@@ -249,15 +250,15 @@ begin
   if v_user is null then
     raise exception 'not_authenticated' using errcode = '28000';
   end if;
-  perform 1 from public.goals
-   where id = p_goal_id and user_id = v_user for update;   -- ownership + lock
+  perform 1 from public.transactions
+   where id = p_transaction_id and user_id = v_user for update;   -- ownership + lock
   if not found then
-    raise exception 'goal_not_found' using errcode = 'P0002';   -- same error whether
-  end if;                                                       -- it is missing or someone else's
+    raise exception 'transaction_not_found' using errcode = 'P0002';   -- same error whether
+  end if;                                                              -- it is missing or someone else's
   ...
 end $$;
-revoke all on function public.add_goal_contribution(uuid,bigint,date,text,uuid) from public, anon;
-grant execute on function public.add_goal_contribution(uuid,bigint,date,text,uuid) to authenticated;
+revoke all on function public.record_transaction_review(uuid,text) from public, anon;
+grant execute on function public.record_transaction_review(uuid,text) to authenticated;
 ```
 
 Rules, each closing a specific known attack:
@@ -267,7 +268,7 @@ Rules, each closing a specific known attack:
 2. **Derive the user from `auth.uid()`**, never from a parameter, **in every function granted to
    `authenticated`**. A `p_user_id` argument on a client-callable definer function is a
    horizontal-privilege-escalation hole with a friendly name. Two functions do take a user id —
-   `evaluate_achievements(p_user_id)` and `recompute_goal_totals(p_user_id)` — and neither is
+   `evaluate_achievements(p_user_id)` and `recompute_xp_totals(p_user_id)` — and neither is
    granted to `authenticated`: the first is called only from inside another definer function that
    has already derived the caller, the second is an operator-run maintenance function reachable
    only with `service_role`. That exemption is the reason the grant, not the signature, is the
@@ -278,8 +279,9 @@ Rules, each closing a specific known attack:
 5. **Never `SECURITY DEFINER` for a plain read.** If RLS can express it, RLS does it.
 6. **A trigger function that writes a column excluded from the caller's grant must be
    `SECURITY DEFINER`** (with rules 1 and 3 applying to it like any other). A plain trigger
-   function runs as the *invoking* user, so `sync_goal_saved()` updating `goals.saved_minor` as
-   `authenticated` fails with `42501` and rolls back the whole contribution. Verified, not
+   function runs as the *invoking* user, so `enforce_split_total()` updating
+   `transactions.is_split` as `authenticated` fails with `42501` and rolls back the whole split.
+   Verified, not
    inferred — see [ADR-0020](./adr/0020-rls-execution-model.md).
 7. **A definer function's reads are policed too.** Inside the function the effective user is the
    function's owner, and both its `SELECT`s and its writes go through RLS unless that owner holds
@@ -300,7 +302,7 @@ token and full control of the request — the realistic baseline, not a worst ca
 | T1 | **Cross-tenant read** (see another user's finances) | Manipulated `user_id` filter, guessed UUID, forged `Range` header | Critical | RLS `SELECT` per table; `FORCE RLS`; `security_invoker` views; CI matrix asserts every table returns 0 rows for a foreign owner | Low — a *new table without a policy* is the live risk; a CI check fails the build on any `public` table with RLS off |
 | T2 | **Cross-tenant write / IDOR** | `POST /transactions {user_id: victim}`; `PATCH /goals?id=eq.<victim's>` | Critical | `WITH CHECK` on INSERT and UPDATE; `user_id` excluded from the UPDATE grant; composite FKs make even a *reference* to a foreign row impossible | Very low |
 | T3 | **XP inflation** | `PATCH /gamification_profiles {xp_total: 999999}`; replaying a check-in call 100× | Medium | No write grant on the table at all; `award_xp` is the only writer; `UNIQUE(user_id, dedupe_key)` makes replay a no-op; `daily_check_in` clamps the increment to 1 and bounds `p_today` against the server date | Very low |
-| T4 | **Goal balance manipulation** | `PATCH /goals {saved_minor: target}`; `POST /goals {saved_minor: target}` at creation | High | `saved_minor` and `achieved_at` absent from the INSERT grant **and** the UPDATE grant (§4.4); total is recomputed from the ledger by trigger; contributions are RPC-only | Very low |
+| T4 | **Goal balance manipulation** | Setting a goal's saved amount directly; re-pointing a goal at a fuller wallet; pointing it at a bank account or another user's wallet | High | **Nothing to forge:** a goal stores no amount — progress is its wallet's ledger balance (ADR-0026). `wallet_account_id` is insert-only (§4.4); the type-pinned composite FK refuses a non-wallet or foreign account with `23503` | Very low |
 | T5 | **Transaction amount manipulation** | Negative amount to inflate a balance; amount larger than 2^53 to corrupt the client | High | `CHECK (amount_minor > 0)` — direction lives in `kind`; upper `CHECK` keeps values inside `Number.MAX_SAFE_INTEGER`; the mapper asserts `Number.isSafeInteger` | Very low |
 | T6 | **Mass assignment** | Sending `is_system`, `status`, `source`, `is_split`, `dedupe_hash`, `created_at`, `id` in a create **or** update body | Medium | Column-level grants on **both** `INSERT` and `UPDATE` (§4.1, §4.4); Zod schemas use `.strict()` and repositories build explicit column lists — a field not in the list is never sent, and one that is sent anyway is `42501` | Very low |
 | T7 | **SQL injection** | Malicious input in description, merchant, filters | High | PostgREST parameterises everything; no string-concatenated SQL anywhere; RPCs use typed parameters; no `EXECUTE` with interpolated input in any function | Very low |
@@ -308,11 +310,11 @@ token and full control of the request — the realistic baseline, not a worst ca
 | T9 | **Token theft via XSS** | Reading the session out of `localStorage` | High | The CSP above is the primary control (a token you cannot exfiltrate is far less useful — `connect-src` is restricted to the Supabase project origin); short access-token lifetime; dependency scanning via Dependabot + `npm audit` in CI; SRI is unnecessary since we self-host all JS | Medium — accepted, see §6 |
 | T10 | **CSRF** | Cross-origin form post to PostgREST | Low | Auth is a `Authorization: Bearer` header, not a cookie; a cross-site form cannot set it. Supabase CORS is restricted to known origins | Negligible |
 | T11 | **Duplicate transactions** | Double tap, retry storm, two devices, replayed request | Medium | `client_request_id` unique per user; optimistic-concurrency check on edits; ingest `dedupe_hash` | Low |
-| T12 | **Race conditions on money** | Two concurrent contributions; two devices creating one budget period | Medium | `FOR UPDATE` row lock in the RPC; recompute-not-increment; `EXCLUDE USING gist` on period overlap; unique idempotency keys | Low |
+| T12 | **Race conditions on money** | Two concurrent transfers into one goal wallet; two devices creating one budget period | Medium | Balances and goal progress are sums computed at read time, so there is no stored total to lose an update to; `FOR UPDATE` row locks in RPCs that read-then-write; `EXCLUDE USING gist` on period overlap; unique idempotency keys | Low |
 | T13 | **Sensitive data in logs** | Full SMS body, amounts, emails, tokens in Sentry or Logcat | High | Never log message bodies (v1 did — `Log.i(TAG, "…message=$body")`); Sentry `beforeSend` scrubs `amount`, `amount_minor`, `email`, `token`, `merchant`, `description`; breadcrumbs carry route names only; a lint rule blocks `console.log` in `src/` | Low |
 | T14 | **Secret leakage** | `service_role` key bundled into the client | Critical | Only `VITE_`-prefixed vars reach the bundle by construction; `config/env.ts` validates the allow-list at startup; CI greps the built bundle for `service_role` and for any JWT with `"role":"service_role"` | Very low |
 | T15 | **Account enumeration** | Different responses for existing vs unknown emails on login/reset | Low | Identical generic responses on both paths; identical timing is not attempted (accepted) | Low |
-| T16 | **Abuse / resource exhaustion** | Scripted inserts, expensive repeated aggregates | Medium | Supabase gateway rate limits; `PGRST_DB_MAX_ROWS` caps any single response; pagination is mandatory in the repository layer; a per-user insert throttle trigger on `transactions` and `goal_contributions` (N rows/minute) is added if abuse appears | **Medium — the honest gap**, see §6 |
+| T16 | **Abuse / resource exhaustion** | Scripted inserts, expensive repeated aggregates | Medium | Supabase gateway rate limits; `PGRST_DB_MAX_ROWS` caps any single response; pagination is mandatory in the repository layer; a per-user insert throttle trigger on `transactions` (N rows/minute) is added if abuse appears | **Medium — the honest gap**, see §6 |
 | T17 | ~~**Malicious regex in a merchant rule** (ReDoS)~~ | ~~User creates `match_type='regex'` with a catastrophic pattern~~ | — | **Eliminated, not mitigated.** `regex` is removed from the `match_type` enum for the MVP ([ADR-0022](./adr/0022-drop-regex-match-type.md)); `contains`/`prefix`/`exact` carry every rule in the M3 fixtures. Pattern length stays capped at 100 chars. If a future ADR reintroduces `regex`, this threat and its mitigations (`statement_timeout`, an RE2-style engine, never PostgreSQL's backtracking `~` on user input) come back with it | None |
 | T18 | **Supply-chain compromise** | A malicious dependency reading the session | High | Small, justified dependency list ([ARCHITECTURE.md §C.6](./ARCHITECTURE.md)); `package-lock.json` committed; `npm ci` only; Dependabot; CI fails on high-severity advisories; no `postinstall` scripts from untrusted packages | Medium — industry-wide, accepted |
 | T19 | **Android: exported SMS receiver** | Any app broadcasting a fake `SMS_RECEIVED` into ours | Medium (future) | v1's receiver is `exported="true"` with no sender validation — a third-party app can inject fabricated transactions. Milestone 12 requires: `android:permission="android.permission.BROADCAST_SMS"` on the receiver, sender-address allow-listing, and every ingested row landing as `pending_review` regardless | Low |
@@ -385,16 +387,19 @@ for every command, the suite asserts that A cannot touch B's row:
 | `update <B's row>` as A | 0 rows affected |
 | `update <A's row> set user_id = B` as A | policy violation (`WITH CHECK`) |
 | `delete <B's row>` as A | 0 rows affected |
-| `update goals set saved_minor = …` on A's own goal | `42501` insufficient privilege |
-| **`insert goals {saved_minor: 5000000}`** as A | `42501` — the insert-side half of §4.4 |
-| **`insert goals {achieved_at: now()}`** as A | `42501` |
-| **`insert goals {name, target_minor}`** as A, no protected columns named | succeeds, and `saved_minor = 0` from its `DEFAULT` |
+| `update goals set wallet_account_id = …` on A's own goal | `42501` — a goal's wallet is fixed at creation |
+| **`insert goals {wallet_account_id: <A's bank account>}`** as A | `23503` — the type-pinned FK admits wallets only |
+| **`insert goals {wallet_account_id: <B's wallet>}`** as A | `23503` (composite FK) |
+| **`insert goals {wallet_account_type: 'bank', …}`** as A | `42501` — absent from the insert grant |
+| `insert goals` on a wallet that already backs a goal | `23505` |
+| **`insert goals {wallet_account_id, name, target_minor}`** as A, own wallet | succeeds, and `wallet_account_type = 'wallet'` from its `DEFAULT` |
+| `update accounts set type = 'bank'` on a wallet backing A's goal | `23503` — `ON UPDATE RESTRICT` |
 | **`insert categories {is_system: true}`** as A | `42501` |
 | **`insert transactions {status: 'confirmed', source: 'sms'}`** as A | `42501` |
 | **`insert transactions {is_split: true}`** as A | `42501` |
 | `update gamification_profiles set xp_total = …` on A's own row | `42501` |
 | `update categories set is_system = false` on A's own row | `42501` |
-| `rpc('add_goal_contribution', {p_goal_id: <B's goal>})` as A | `goal_not_found` — the same error B's missing goal would give |
+| `rpc('record_transaction_review', {p_transaction_id: <B's transaction>})` as A *(M12)* | `transaction_not_found` — the same error B's missing row would give |
 | `select` any table as `anon` | permission denied |
 | calling every RPC as `anon` | permission denied |
 | `update budget_periods` where `closed_at is not null` | 0 rows affected |
@@ -488,7 +493,7 @@ select p.proname from pg_proc p
 -- Maintained as an explicit list because "writes a protected column" is not introspectable.
 select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
  where n.nspname = 'public' and not p.prosecdef
-   and p.proname in ('sync_goal_saved','enforce_split_total','award_xp',
+   and p.proname in ('enforce_split_total','award_xp',
                      'audit_row','handle_new_user','evaluate_achievements');   -- must be empty
 ```
 
@@ -539,7 +544,7 @@ addresses, so another app cannot inject fabricated transactions.
 | **Anon key leaked** | It is public by design — it grants nothing beyond RLS. No action beyond confirming RLS coverage. |
 | **`service_role` key leaked** | Rotate immediately in the Supabase dashboard; redeploy Edge Functions and CI secrets; audit `audit_log` and Supabase logs for the exposure window. |
 | **Cross-tenant data exposure found** | Disable the affected route via a feature flag; add the missing policy; add the case to the RLS matrix *before* the fix; determine the affected window from Supabase logs; notify affected users. |
-| **Money inconsistency reported** | `audit_log` plus the append-only `goal_contributions` and `gamification_events` ledgers make the true value recoverable. `recompute_goal_totals()` repairs caches. This is why the ledgers are append-only. |
+| **Money inconsistency reported** | `audit_log`, soft-deleted `transactions` and the append-only `gamification_events` make the true value recoverable. Balances and goal progress need no repair — they are derived from `transactions` on every read. `recompute_xp_totals()` repairs the one cache. This is why the ledgers are append-only. |
 | **Dependency advisory** | Dependabot PR, CI, expedited review; if actively exploited, patch and deploy same-day. |
 
 Every one of these depends on being able to *reconstruct history*, which is why append-only ledgers

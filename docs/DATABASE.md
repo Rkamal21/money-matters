@@ -13,8 +13,8 @@ Status: **Proposed** · Companion to [ARCHITECTURE.md](./ARCHITECTURE.md) · Dat
 
 | # | Principle | Consequence in the schema |
 |---|---|---|
-| P1 | **The ledger is the truth.** Anything derivable from transactions or contributions is derived. | Account balances are a **view**. Budget "spent" is a **query**. Goal progress is a trigger-maintained cache *recomputed from the ledger*, never incremented. |
-| P2 | **The client is never trusted with an authoritative number.** | `goals.saved_minor`, `gamification_profiles.xp_total`, `goals.achieved_at` have no `INSERT` grant and no `UPDATE` grant for `authenticated` — a row cannot be *born* with a fabricated total any more than it can be edited into one. Tampering is impossible, not merely discouraged. |
+| P1 | **The ledger is the truth.** There is one ledger, `transactions`, and anything derivable from it is derived. | Account balances are a **view**. Budget "spent" is a **query**. Goal progress is the balance of the goal's wallet — also a view. A goal is the *purpose* of money, never a second balance ([ADR-0026](./adr/0026-goals-are-the-purpose-of-a-wallet.md)). |
+| P2 | **The client is never trusted with an authoritative number.** | `gamification_profiles.xp_total` has no `INSERT` grant and no `UPDATE` grant for `authenticated` — a row cannot be *born* with a fabricated total any more than it can be edited into one. Goals carry no amount to forge at all. Tampering is impossible, not merely discouraged. |
 | P3 | **Ownership is structural, not conventional.** | Every user table carries `user_id`, has a `UNIQUE (id, user_id)`, and every cross-table reference is a **composite foreign key** `(x_id, user_id)`. A row cannot reference another user's row even if RLS were misconfigured. |
 | P4 | **Money is exact.** | `bigint` minor units (paise). No `float`, `real`, or `double precision` anywhere. `numeric` appears only for a confidence score. |
 | P5 | **Civil dates and instants are different types.** | `occurred_on date` ("the day I spent it") is separate from `created_at timestamptz` ("when the row was written"). They are never compared. |
@@ -48,12 +48,10 @@ erDiagram
 
     TRANSACTIONS ||--o{ TRANSACTION_SPLITS : "splits into"
     TRANSACTIONS ||--o| TRANSACTIONS_R : "refund_of_transaction_id"
-    TRANSACTIONS ||--o| GOAL_CONTRIBUTIONS : "may fund"
 
     BUDGET_PERIODS ||--o{ BUDGET_CATEGORY_LIMITS : contains
 
-    GOALS ||--o{ GOAL_CONTRIBUTIONS : "ledger of"
-    ACCOUNTS ||--o| GOALS : "linked_account_id"
+    ACCOUNTS ||--o| GOALS : "wallet_account_id (type = wallet, 1:1)"
 
     GAMIFICATION_PROFILES ||--o{ GAMIFICATION_EVENTS : "aggregated from"
     ACHIEVEMENTS ||--o{ USER_ACHIEVEMENTS : "unlocked as"
@@ -127,19 +125,11 @@ erDiagram
     GOALS {
         uuid id PK
         uuid user_id FK
+        uuid wallet_account_id FK "UNIQUE, insert-only"
         text name
         bigint target_minor
-        bigint saved_minor "TRIGGER-maintained cache"
         date target_date
-        timestamptz achieved_at "trigger-only"
         timestamptz archived_at "user-writable"
-    }
-    GOAL_CONTRIBUTIONS {
-        uuid id PK
-        uuid goal_id FK
-        bigint amount_minor "negative equals withdrawal"
-        date occurred_on
-        uuid client_request_id "idempotency"
     }
     GAMIFICATION_PROFILES {
         uuid user_id PK
@@ -228,7 +218,7 @@ Three distinct concepts, three distinct representations. Conflating them caused 
 
 | Concept | Type | Example | Rule |
 |---|---|---|---|
-| **Instant** | `timestamptz` | `created_at`, `updated_at`, `achieved_at` | System time. Written by the database (`now()`), never by the client. Never used to decide which day or period a transaction belongs to. |
+| **Instant** | `timestamptz` | `created_at`, `updated_at`, `closed_at` | System time. Written by the database (`now()`), never by the client. Never used to decide which day or period a transaction belongs to. |
 | **Civil date** | `date` | `occurred_on`, `target_date`, `last_check_in_on` | The user's calendar day in the user's timezone. Timezone-free by construction — a `date` has no instant to convert. |
 | **Period** | `daterange` | `budget_periods.period` | Half-open `[start, end)`. Compared with `@>` and `&&`, never with string prefixes. |
 | **Zone** | `text` (IANA) | `profiles.timezone = 'Asia/Kolkata'` | The single input that turns an instant into a civil date. Validated by `public.is_valid_timezone()`. |
@@ -260,7 +250,6 @@ create type public.transaction_source      as enum ('manual','sms','import','ban
 create type public.transaction_status      as enum ('detected','pending_review','confirmed','rejected','duplicate');
 create type public.match_type              as enum ('contains','prefix','exact');
                                            -- 'regex' deliberately absent: ADR-0022
-create type public.contribution_source     as enum ('manual','transfer','auto_rule','system');
 create type public.gamification_event_type as enum (
   'transaction_logged','daily_check_in','goal_contribution','goal_achieved',
   'budget_reviewed','period_under_budget','achievement_unlocked','adjustment');
@@ -320,8 +309,13 @@ Conventions applied to **every** user-owned table below, not repeated each time:
 | `is_archived` | `boolean` | no | `false` | archived accounts keep history, disappear from pickers |
 | `position` | `smallint` | no | `0` | user ordering |
 
-**Unique:** `(user_id, name)`, `(id, user_id)`.
+**Unique:** `(user_id, name)`, `(id, user_id)`, `(id, user_id, type)` — the last is the target of
+the type-pinned goal FK (§6.8).
 **Index:** `accounts_user_active_idx (user_id, position) WHERE NOT is_archived`.
+**Wallets:** `type = 'wallet'` is a container for money with a purpose — an e-wallet balance, or a
+pot that backs a goal. It is an ordinary account: its balance is derived, and money enters and
+leaves only through `transactions`. A wallet that backs a goal cannot change `type` (the goal's FK
+refuses it). See [ADR-0026](./adr/0026-goals-are-the-purpose-of-a-wallet.md).
 **Deletion:** `ON DELETE RESTRICT` from `transactions`. An account with history cannot be deleted,
 only archived — a deliberate refusal to let one UI action destroy ledger integrity.
 **Credit cards:** a purchase is an `expense` on the card account, so the derived balance goes
@@ -510,56 +504,59 @@ answer — enforced by the database, not by application care. The GiST index it 
 
 **Unique:** `(budget_period_id, category_id)`. **Index:** `bcl_period_idx (user_id, budget_period_id)`.
 
-### 6.8 `goals` and `goal_contributions`
+### 6.8 `goals`
 
-**`goals`**
+**Purpose:** the *purpose* of money. A goal holds no money and stores no amount saved. Every goal
+is backed by exactly one wallet (§6.2), and its progress **is** that wallet's balance. Contributing
+is a transfer into the wallet; withdrawing is a transfer out; spending the money on its purpose is
+an expense from the wallet. See [ADR-0026](./adr/0026-goals-are-the-purpose-of-a-wallet.md), which
+supersedes the contribution ledger of [ADR-0010](./adr/0010-goal-progress-trigger-maintained.md).
 
 | Column | Type | Null | Default | Notes |
 |---|---|---|---|---|
 | `id`, `user_id` | `uuid` | no | | |
-| `name` | `text` | no | | `CHECK (btrim(name) <> '')` |
-| `target_minor` | `bigint` | no | | `CHECK (> 0)` |
-| `currency_code` | `char(3)` | no | `'INR'` | |
-| `saved_minor` | `bigint` | no | `0` | **trigger-maintained cache.** No `INSERT` and no `UPDATE` grant for `authenticated`; on creation it takes its `DEFAULT` |
+| `wallet_account_id` | `uuid` | no | | the backing wallet. **`UNIQUE`** — a wallet backs at most one goal, archived goals included. In the `INSERT` grant, **not** the `UPDATE` grant: re-pointing a goal at a fuller wallet would complete it with no money moving |
+| `wallet_account_type` | `account_type` | no | `'wallet'` | `CHECK (wallet_account_type = 'wallet')`. Exists only to carry the type-pinned FK below; absent from both grants, so it always takes its `DEFAULT` |
+| `name` | `text` | no | | `CHECK (btrim(name) <> '' AND char_length(name) <= 60)` |
+| `target_minor` | `bigint` | no | | `CHECK (> 0 AND < 900000000000000)`, in the wallet's currency |
 | `target_date` | `date` | yes | — | |
-| `linked_account_id` | `uuid` | yes | — | composite FK, `ON DELETE SET NULL` |
 | `priority` | `smallint` | no | `100` | |
-| `achieved_at` | `timestamptz` | yes | — | **trigger-only.** No client `INSERT` or `UPDATE` grant |
 | `archived_at` | `timestamptz` | yes | — | user-writable |
 
-> There is deliberately **no `status` column.** Status is derived: `archived_at → archived`,
-> else `saved_minor >= target_minor → achieved`, else `active`. A stored status is a third thing
-> that can disagree with the other two. v1's `goals.current` was exactly that kind of drift, and
-> it was writable straight from the browser console.
+**The type-pinned foreign key.** A composite FK carries ownership (§7); adding the account type
+carries "must be a wallet" as well:
 
-**`goal_contributions`** — the append-only ledger
+```sql
+constraint goals_wallet_fk
+  foreign key (wallet_account_id, user_id, wallet_account_type)
+  references public.accounts (id, user_id, type)
+  on delete restrict on update restrict,
+constraint goals_wallet_uk unique (wallet_account_id)
+```
 
-| Column | Type | Null | Notes |
-|---|---|---|---|
-| `id`, `user_id` | `uuid` | no | |
-| `goal_id` | `uuid` | no | composite FK, `ON DELETE CASCADE` |
-| `amount_minor` | `bigint` | no | `CHECK (<> 0)` — negative is a withdrawal |
-| `occurred_on` | `date` | no | |
-| `source` | `contribution_source` | no | |
-| `transaction_id` | `uuid` | yes | composite FK — set when a real transfer funded the goal |
-| `note` | `text` | yes | |
-| `client_request_id` | `uuid` | yes | idempotency key |
+Pointing a goal at a bank account, pointing it at another user's wallet, and retyping a wallet that
+backs a goal are all `23503` at the storage layer — no trigger to forget.
 
-**Unique:** `(user_id, client_request_id) WHERE client_request_id IS NOT NULL`.
-**Index:** `gc_goal_idx (user_id, goal_id, occurred_on desc)`.
+> There is deliberately **no `saved_minor`, no `achieved_at`, no `currency_code`, and no `status`.**
+> The amount saved is the wallet's balance; achieved is derived from the wallet's history; the
+> currency is the wallet's; status is `archived_at → archived`, else `reached → achieved`, else
+> `active`. Every one of those, stored, would be a second fact that could disagree with the ledger.
+> v1's `goals.current` was exactly that kind of drift, and it was writable from the browser console.
 
-**Consistency of `saved_minor`** — this is the system's one real denormalisation, so it gets the
-full four-part answer:
+**`goal_progress`** — the derived read model (a view, §8)
 
-| Question | Answer |
+| Column | Meaning |
 |---|---|
-| **Why denormalise?** | The goals list renders progress for every goal. Without the cache each render is a correlated `SUM` per goal; with 20 goals that is 20 aggregate scans on a frequently-opened screen. The cache makes it one index scan. |
-| **Source of truth** | `goal_contributions`. Always. `saved_minor` has no independent authority. |
-| **Update mechanism** | `AFTER INSERT OR UPDATE OR DELETE` trigger `sync_goal_saved()` takes `SELECT … FOR UPDATE` on the goal row, then **recomputes** `saved_minor = coalesce(sum(amount_minor),0)` from the ledger and sets/clears `achieved_at`. It never does `saved_minor = saved_minor + x`: an incremental update can drift, a recompute cannot. |
-| **Consistency strategy** | The trigger runs in the same transaction as the contribution write, so the two are never separately visible. The row lock serialises concurrent contributions to the same goal. |
-| **Recovery strategy** | `public.recompute_goal_totals(p_user_id uuid default null)` rebuilds every cached total from the ledger. A CI integration test asserts `saved_minor = sum(contributions)` for all goals after a randomised concurrent write workload; the same assertion can run as a scheduled production check. |
+| `balance_minor` | the wallet's balance from `account_balances` — the amount saved |
+| `reached` | the wallet's opening balance, or its running balance on any `occurred_on`, has met `target_minor`. **Sticky:** buying the laptop lowers the balance but does not un-achieve the goal |
+| `reached_on` | the first `occurred_on` on which the running balance met the target; `NULL` when not reached, or when the opening balance alone met it |
 
-See [ADR-0010](./adr/0010-goal-progress-trigger-maintained.md).
+Nothing here can drift, because nothing here is stored. Editing, deleting or back-dating a
+transaction in the wallet changes `balance_minor`, `reached` and `reached_on` on the next read,
+which is the correct behaviour for a number derived from the ledger.
+
+**Index:** `goals_user_active_idx (user_id, priority) WHERE archived_at IS NULL`. The per-wallet
+aggregates are served by `tx_user_account_idx` and `tx_user_counter_idx` (§6.4).
 
 ### 6.9 Gamification tables
 
@@ -633,7 +630,7 @@ characters, so a reintroduction starts from a bounded input.
 (`insert|update|delete`), `changed_fields jsonb`, `actor uuid`, `created_at`.
 
 Written by a `SECURITY DEFINER` trigger on `transactions`, `budget_periods`,
-`budget_category_limits`, `goals`, and `goal_contributions`. The client has **`SELECT` only** on
+`budget_category_limits`, and `goals`. The client has **`SELECT` only** on
 its own rows and no write grant at all. This is what answers "why did my budget change?" and
 "what did I edit last Tuesday?" without a second system.
 **Index:** `audit_user_time_idx (user_id, created_at desc)`. Retention: 24 months, then pruned.
@@ -673,9 +670,7 @@ application code, and regardless of whether a policy was written correctly.
 | `transaction_splits.category_id` | `categories (id, user_id)` | `restrict` |
 | `budget_category_limits.budget_period_id` | `budget_periods (id, user_id)` | `cascade` |
 | `budget_category_limits.category_id` | `categories (id, user_id)` | `restrict` |
-| `goal_contributions.goal_id` | `goals (id, user_id)` | `cascade` |
-| `goal_contributions.transaction_id` | `transactions (id, user_id)` | `set null` |
-| `goals.linked_account_id` | `accounts (id, user_id)` | `set null` |
+| `goals.wallet_account_id` | `accounts (id, user_id, type)` — type pinned to `'wallet'` (§6.8) | `restrict` |
 | `categories.parent_id` | `categories (id, user_id)` | `set null` |
 
 Cost: one extra unique index per table and a slightly unusual DDL idiom. Benefit: the
@@ -734,6 +729,33 @@ create view public.transaction_category_amounts with (security_invoker = true) a
     left join public.transaction_splits s on s.transaction_id = t.id
    where t.deleted_at is null and t.status = 'confirmed'
      and t.kind in ('expense','income','refund');
+
+-- A goal's progress is its wallet's balance. `reached` is sticky: it asks whether the running
+-- balance EVER met the target, so spending the money on its purpose does not un-achieve the goal.
+create view public.goal_progress with (security_invoker = true) as
+  with running as (
+    select e.account_id, e.occurred_on,
+           sum(sum(e.signed_amount_minor))
+             over (partition by e.account_id order by e.occurred_on) as net_to_date_minor
+      from public.account_entries e
+     where e.account_id in (select g.wallet_account_id from public.goals g)
+     group by e.account_id, e.occurred_on
+  )
+  select g.user_id, g.id as goal_id, g.wallet_account_id, b.currency_code, g.target_minor,
+         b.balance_minor,
+         a.opening_balance_minor >= g.target_minor
+           or exists (select 1 from running r
+                       where r.account_id = g.wallet_account_id
+                         and a.opening_balance_minor + r.net_to_date_minor >= g.target_minor)
+           as reached,
+         case when a.opening_balance_minor < g.target_minor then
+           (select min(r.occurred_on) from running r
+             where r.account_id = g.wallet_account_id
+               and a.opening_balance_minor + r.net_to_date_minor >= g.target_minor)
+         end as reached_on
+    from public.goals g
+    join public.accounts a         on a.id = g.wallet_account_id
+    join public.account_balances b on b.account_id = g.wallet_account_id;
 ```
 
 `security_invoker = true` (PostgreSQL 15+) makes a view run with the **querying user's** privileges,
@@ -741,9 +763,10 @@ so the underlying RLS policies still apply. A view without it runs as its owner 
 an RLS bypass. This flag is a security control, not a style choice; its presence on every view is
 asserted by a CI check over `pg_class.reloptions`.
 
-**Nothing derived is stored** except `goals.saved_minor` (§6.8) and `transactions.is_split` (a
-boolean used only to pick a query shape). Every other number — account balance, budget spent,
-category totals, savings rate, XP level — is computed from the ledger at read time. That is the
+**Nothing derived is stored** except `gamification_profiles.xp_total` (§6.9) and
+`transactions.is_split` (a boolean used only to pick a query shape). Every other number — account
+balance, goal progress, budget spent, category totals, savings rate, XP level — is computed from the
+ledger at read time. That is the
 answer to "where can money become inconsistent?": almost nowhere, because almost nothing is
 duplicated.
 
@@ -791,13 +814,11 @@ whose owner cannot write through RLS fails *silently*. Both are verified behavio
 | `handle_new_user()` | `AFTER INSERT ON auth.users` | **definer** | trigger only | creates `profiles`, `gamification_profiles`, and the 12 seed categories in one transaction. Writes tables with no client policy, so definer is mandatory |
 | `enforce_transaction_dates()` | `BEFORE INS/UPD` trigger | invoker | trigger only | rejects an absurd future `occurred_on` (the bound a `CHECK` cannot express). Raises only; writes nothing |
 | `enforce_split_total()` | `DEFERRABLE` constraint trigger | **definer** | trigger only | `sum(splits) = transaction.amount_minor`; maintains `is_split`, which is absent from the client's grants |
-| `sync_goal_saved()` | `AFTER INS/UPD/DEL` trigger | **definer** | trigger only | recomputes `goals.saved_minor` from the ledger; sets/clears `achieved_at`. Both columns are absent from the client's grants |
 | `award_xp(type, dedupe_key, xp, ctx)` | internal fn | **definer** | internal only — no grant | the **only** writer of `gamification_events` and `xp_total`; idempotent on `dedupe_key`; enforces the per-day caps in [FINANCIAL-ENGINE.md §6](./FINANCIAL-ENGINE.md); no-ops when `gamification_enabled = false` |
-| `on_transaction_awards_xp()` | `AFTER INSERT` trigger | invoker | trigger only | calls `award_xp('transaction_logged', 'tx:'||new.id, …)`, which elevates |
+| `on_transaction_awards_xp()` | `AFTER INSERT` trigger | invoker | trigger only | calls `award_xp('transaction_logged', 'tx:'||new.id, …)`, which elevates. A transfer into a goal's wallet is awarded as `goal_contribution` (`contrib:<id>`) instead, and the first transaction that makes `goal_progress.reached` true awards `goal_achieved` (`goal:<goal id>`) — [ADR-0026](./adr/0026-goals-are-the-purpose-of-a-wallet.md) |
 | `evaluate_achievements(p_user_id)` | internal fn | **definer** | internal only — no grant | unlocks catalog achievements whose predicate now holds. Takes a user id because its only callers are definer functions that have already derived `auth.uid()`; never granted to `authenticated` ([SECURITY.md §4.5](./SECURITY.md) rule 2) |
 | `audit_row()` | `AFTER INS/UPD/DEL` trigger | **definer** | trigger only | writes `audit_log`, which has no client write grant |
-| `recompute_goal_totals(p_user_id default null)` | maintenance fn | **definer** | `service_role` only | recovery path for `saved_minor` |
-| `recompute_xp_totals(p_user_id default null)` | maintenance fn | **definer** | `service_role` only | recovery path for `gamification_profiles.xp_total`, rebuilt from `gamification_events`. The counterpart the design has always claimed ([ARCHITECTURE.md §R.1, §R.15](./ARCHITECTURE.md)) and never named |
+| `recompute_xp_totals(p_user_id default null)` | maintenance fn | **definer** | `service_role` only | recovery path for `gamification_profiles.xp_total`, rebuilt from `gamification_events` — the system's one remaining cache ([ARCHITECTURE.md §R.1, §R.15](./ARCHITECTURE.md)) |
 | `prevent_system_category_delete()` | `BEFORE DELETE` trigger | invoker | trigger only | protects seeded categories. Raises only |
 
 Every `SECURITY DEFINER` function is written with `SET search_path = ''` and fully-qualified object
@@ -814,7 +835,6 @@ Signatures, errors, and authorization in [API.md §4](./API.md).
 
 | Function | Why it must be an RPC rather than a REST write |
 |---|---|
-| `add_goal_contribution(p_goal_id, p_amount_minor, p_occurred_on, p_note, p_client_request_id)` | Contribution insert + total recompute + achievement evaluation + XP award must be one transaction. Three client round-trips (v1's shape) leave the database inconsistent whenever the network drops mid-sequence. |
 | `ensure_budget_period(p_today date)` | Creating "this month's budget" on first load of a new month is a race between two devices. `INSERT … ON CONFLICT DO NOTHING` inside the function makes it idempotent, and it carries the previous plan and rollover forward. |
 | `get_period_summary(p_from date, p_to date)` | Server-side aggregation: income/expense/fixed/variable totals plus per-category sums in one result set, instead of shipping rows to the browser to `reduce`. |
 | `get_dashboard_snapshot(p_today date)` | One round trip for the whole dashboard — period, plan, totals, budget usage, goal summaries, gamification. Removes a 7-request waterfall on the slowest screen on the slowest network. |
@@ -828,7 +848,7 @@ Signatures, errors, and authorization in [API.md §4](./API.md).
 
 | Scenario | Mechanism |
 |---|---|
-| **Two goal contributions at once** | `add_goal_contribution` takes `SELECT … FROM goals WHERE id = … FOR UPDATE` before writing. The second transaction blocks, then recomputes from a ledger that already includes the first. Lost updates are impossible because the total is a recompute, not an increment. |
+| **Two contributions to one goal at once** | Two transfers into the goal's wallet are two independent `INSERT`s. No lock is needed: progress is the wallet's balance, a sum computed at read time, so there is no stored total to lose an update to. |
 | **The same transaction submitted twice** (double tap, retry, two devices) | `client_request_id` is generated once per form submission and reused across retries. `UNIQUE (user_id, client_request_id)` turns the second write into a `23505`, which the repository maps to "already saved" and returns the existing row. Idempotency, not after-the-fact deduplication. |
 | **Two edits to the same transaction** | Optimistic concurrency on `updated_at`: `UPDATE … WHERE id = $1 AND updated_at = $2`. Zero rows ⇒ `conflict` ⇒ the UI shows "this changed elsewhere; reload". Last-write-wins is not acceptable on money. |
 | **Two devices creating this month's budget** | `ensure_budget_period` plus the `EXCLUDE USING gist` overlap constraint. Worst case, one transaction gets `23P01` and retries into the winner's row. |
@@ -852,7 +872,7 @@ supabase/migrations/
   20260910120600_transactions.sql
   20260910120700_transaction_splits.sql
   20260910120800_budget_periods.sql
-  20260910120900_goals_and_contributions.sql
+  20260910120900_goals.sql
   20260910121000_merchant_rules.sql
   20260910121100_views.sql
   20260910121200_rpcs.sql
@@ -888,7 +908,7 @@ supabase/migrations/
 | `DECIMAL(10,2)` read into a JS `Number` | Float arithmetic on money; ₹100M ceiling | §3 `bigint` minor units |
 | `CHECK (category IN (…))` | A user category needs a migration | §6.3 `categories` table |
 | `budgets` with `UNIQUE(user_id)`, no period | No budget history; editing September destroyed August | §6.6 `budget_periods` |
-| `goals.current` client-writable | `UPDATE goals SET current = target` from the console | §6.8 ledger + trigger + no grant |
+| `goals.current` client-writable | `UPDATE goals SET current = target` from the console | §6.8 — a goal stores no amount; progress is its wallet's ledger balance |
 | `profiles.xp`, `profiles.level` client-writable | `xp = 999999` from the console; xp and level could disagree | §6.9 events + `award_xp` + derived level |
 | `FOR ALL USING (auth.uid() = user_id)` | No `WITH CHECK` ⇒ rows could be inserted owned by someone else | [SECURITY.md §4](./SECURITY.md) |
 | `date timestamptz` compared to `toISOString().slice(0,10)` | "Today" meant UTC-today — wrong for 5½ hours of every IST day | §4 `occurred_on date` + user timezone |

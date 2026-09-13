@@ -108,8 +108,8 @@ Every case in [FINANCIAL-ENGINE.md §3.5](./FINANCIAL-ENGINE.md), plus:
 
 - Budget: thresholds at exactly 0.749/0.75/0.999/1.0/1.001; `pace` against elapsed ratio; rollover
   in both directions; zero limit → `no_limit`, never a division by zero
-- Goals: achieved, overdue, over-saved, single contribution (`too_few_points`), net-negative rate,
-  empty history
+- Goals: achieved, **reached then spent** (still achieved), overdue, over-saved, a single inflow
+  (`too_few_points`), net-negative rate, negative wallet balance, empty wallet history
 - Gamification: the full streak transition table including the `invalid` future-date case; level
   boundaries at 0/99/100/101 XP; daily caps
 - Categorisation: normalisation of real Indian merchant strings
@@ -137,12 +137,11 @@ table in [SECURITY.md §8.1](./SECURITY.md). Summary:
 | A updates B's row | 0 rows affected |
 | A sets `user_id = B` on their own row | policy violation (`WITH CHECK`) |
 | A deletes B's row | 0 rows affected |
-| A updates `goals.saved_minor` on their own goal | `42501` |
-| A **inserts** a goal naming `saved_minor` or `achieved_at` | `42501` — the insert-side half of the control (ADR-0019) |
-| A inserts a goal naming only granted columns | succeeds; `saved_minor` is `0` from its `DEFAULT` |
+| A points a goal at their own bank account, or at B's wallet | `23503` (type-pinned composite FK) |
+| A changes `goals.wallet_account_id` on their own goal | `42501` — insert-only (ADR-0026) |
+| A creates a second goal on a wallet that already backs one | `23505` |
 | A **inserts** a category naming `is_system`, or a transaction naming `status` / `source` / `is_split` | `42501` |
 | A updates `gamification_profiles.xp_total` | `42501` |
-| A calls `add_goal_contribution` on B's goal | `goal_not_found` (identical to a missing goal) |
 | `anon` touches anything | permission denied |
 | Any table with RLS off, any view without `security_invoker`, any `FOR ALL` policy | build fails |
 
@@ -160,23 +159,24 @@ table in [SECURITY.md §8.1](./SECURITY.md). Summary:
 | `occurred_on` in 1990 / 2099 | rejected (`CHECK` / trigger respectively) |
 | Delete an account with transactions | `23503` restrict |
 | Delete a system category | trigger error |
-| Contribution insert/update/delete | `goals.saved_minor === sum(contributions)` after each |
-| Contribution reaching the target | `achieved_at` set; going back below | cleared |
+| Transfer into a goal's wallet; edit it; soft-delete it | `goal_progress.balance_minor` equals the wallet's `account_balances` row after each |
+| Wallet reaches the target, then an expense spends it | `reached` stays `true`; `reached_on` is the crossing date |
+| Back-date a transaction so the wallet crosses the target earlier | `reached_on` moves to the earlier date |
+| Retype a wallet that backs a goal | `23503` |
 | Signup | `profiles` + `gamification_profiles` + 12 categories exist, in one transaction |
 
 ### 4.3 RPC behaviour
 
 | Test | Asserts |
 |---|---|
-| `add_goal_contribution` happy path | contribution + total + XP event + achievement + audit row, all present |
-| Same call twice with one `client_request_id` | one contribution, one XP event, second call returns the first row |
-| **Concurrent contributions** — 20 parallel calls to one goal | `saved_minor === sum(contributions)` exactly; no lost updates |
+| **Concurrent contributions** — 20 parallel transfers into one goal's wallet | `balance_minor` equals the opening balance plus their sum, exactly |
+| The same contribution submitted twice with one `client_request_id` | one transfer; the second call returns the first row |
 | `ensure_budget_period` called twice concurrently | exactly one period row |
 | `daily_check_in` twice in a day | one XP event, streak unchanged |
 | `daily_check_in` with `p_today` far in the future/past | rejected |
 | `get_period_summary` with transfers present | transfers appear in neither income nor expense |
 | `get_period_summary` with splits present | category totals come from splits, and sum to the parent |
-| `recompute_goal_totals` after deliberate corruption (via `service_role`) | totals restored |
+| `recompute_xp_totals` after deliberate corruption (via `service_role`) | totals restored |
 
 ### 4.4 Migrations
 
@@ -195,9 +195,9 @@ Four assertions that exist because this behaviour is silent when it breaks
 | Test | Asserts |
 |---|---|
 | Every `SECURITY DEFINER` function's owner has `rolbypassrls` | a schema query, run with the other §8.2 assertions |
-| `sync_goal_saved()` and `enforce_split_total()` are `SECURITY DEFINER` | a plain trigger writing a protected column fails `42501` and rolls back the user's write |
-| Contribution as user A, then `saved_minor = sum(contributions)` | the positive control — proves the definer trigger can actually read the ledger and write the cache |
-| Revoke `BYPASSRLS` from the function owner in a scratch database, insert a contribution | the total goes **stale with no error**. This is the regression test for the failure mode, and it is the reason the assertion above exists |
+| `enforce_split_total()` and `award_xp()` are `SECURITY DEFINER` | a plain trigger writing a protected column fails `42501` and rolls back the user's write |
+| Splits written as user A, then `is_split` is `true` and the sum matches | the positive control — proves the definer trigger can actually read `transaction_splits` and write `is_split` |
+| Revoke `BYPASSRLS` from the function owner in a scratch database, trigger an XP award | `xp_total` goes **stale with no error**. This is the regression test for the failure mode, and it is the reason the assertion above exists |
 
 ---
 
@@ -241,8 +241,10 @@ Sign up → confirm email (via the local mail catcher)
         the transfer appears in NEITHER income NOR expenses
         month spend = ₹450 (not ₹10,450)
         safe daily limit is present, > 0, and is not income/30
-  → Create goal "New Laptop" ₹50,000
-  → Contribute ₹5,000 → progress 10%
+  → Create goal "New Laptop" ₹50,000, backed by a new "Laptop" wallet
+  → Contribute ₹5,000: a transfer Bank → Laptop wallet
+        goal progress 10%; the Laptop wallet balance is ₹5,000
+        the transfer appears in NEITHER income NOR expenses
   → XP increased; streak = 1
   → Reload the page: every number is identical (nothing lived only in memory)
 ```

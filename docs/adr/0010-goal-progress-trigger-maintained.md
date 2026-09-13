@@ -1,6 +1,11 @@
 # ADR-0010 — Goal progress as a trigger-maintained cache over an append-only ledger
 
-Status: **Proposed** · Date: 2026-09-07
+Status: **Superseded by [ADR-0026](./0026-goals-are-the-purpose-of-a-wallet.md)** · Date: 2026-09-07
+
+> Superseded before implementation. The contribution ledger below was a second ledger beside
+> `transactions`, so a goal could report money no account held. Goals now store no amount: each is
+> backed by one wallet, and its progress is that wallet's balance. Kept for the reasoning about
+> recompute-versus-increment, which still governs `gamification_profiles.xp_total`.
 
 ## Context
 

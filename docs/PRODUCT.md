@@ -36,7 +36,7 @@ Each stage maps to a concrete part of the system, and each has a question it mus
 | **Track** | What did I actually spend? | Fast transaction entry, categorisation, later SMS ingest | `transactions`, `categorize` |
 | **Understand** | Where is it going? Am I on track? | Dashboard, analytics, spending breakdown | `analytics` |
 | **Adjust** | How much can I safely spend today? | **Safe daily limit**, budget status | `budget` |
-| **Save** | Am I getting anywhere? | Goals and the contribution ledger | `goals` |
+| **Save** | Am I getting anywhere? | Goals — each the purpose of a wallet | `goals` |
 | **Improve** | What should I change next? | Insights, streaks, financial health score | `insights`, `health` |
 
 **The loop closes at Adjust → Save.** Most trackers stop at Understand and leave the user with a
@@ -55,7 +55,7 @@ Directly from the brief. Each is a UI surface with an owner, so none of them qui
 | How much can I safely spend? | Safe Daily Limit widget (the hero number) | budget plan + `treatment` classification |
 | Am I staying within my budget? | Budget Status widget; Budget screen | category limits |
 | Am I saving enough? | Savings rate in Analytics; Goals widget | income + expense completeness |
-| How close am I to my goals? | Goals widget; goal detail with projection | contribution ledger |
+| How close am I to my goals? | Goals widget; goal detail with projection | the goal wallet's balance |
 | Which habits are improving? | Analytics → month comparison; streaks; health score | ≥ 2 periods of history |
 | What should I change next? | Insights widget | rules engine (M8), AI later (M13) |
 
@@ -92,13 +92,16 @@ finance user's trust, and it is not permitted.
 
 - Email/password auth with confirmation and reset
 - Onboarding: income, period start day, savings target, first account
-- Multiple accounts: cash, bank, savings, wallet, credit card
+- Multiple accounts: cash, bank, savings, credit card, and **wallets** — containers for money with a
+  purpose (an e-wallet balance, or a pot that backs a goal)
 - Transactions: income, expense, **transfer**, refund; manual entry, splits, edit, soft delete
 - Categories: 12 seeded, fully editable, user-created, archivable, `fixed`/`variable`/`excluded`
 - Merchant-rule categorisation with user overrides that teach the system
 - Budget: per-period plan, category limits, rollover, full history
 - **Safe daily limit** with a visible breakdown
-- Savings goals with a contribution ledger and progress projection
+- Savings goals: each backed by one wallet, funded by transfers, with progress projection. A goal
+  is the *purpose* of money, never a second balance
+  ([ADR-0026](./adr/0026-goals-are-the-purpose-of-a-wallet.md))
 - Modular dashboard: balance, safe daily limit, budget status, recent transactions, breakdown,
   goals, month summary
 - Dark/light theme; full keyboard and screen-reader support
@@ -108,7 +111,7 @@ finance user's trust, and it is not permitted.
 | Deferred | Milestone | Why deferred |
 |---|---|---|
 | Analytics screen: by category, over time, income vs expenses, savings rate, month comparison | 8 | Needs at least two periods of data before any of it says something true |
-| Gamification surfaces: XP, levels, streaks, ten achievements | 9 | The **schema** and `award_xp` land in M1 so signup and the contribution RPC are stable; the surfaces are an amplifier, not the product. XP is accruing before it is displayed |
+| Gamification: XP, levels, streaks, ten achievements | 9 | The **schema** and `award_xp` land in M1 so the signup trigger is stable; the award triggers and the surfaces land together in M9. They are an amplifier, not the product |
 | Android app | 11 | The web app must be right first; Capacitor wraps the same bundle |
 | Bank SMS automation | 12 | Google Play policy risk is unresolved (R5); a hard dependency here would be a product bet on someone else's approval |
 | AI insights | 13 | A rules engine covers the top 10 insights; AI without a data corpus is a demo |
@@ -177,7 +180,7 @@ away from later:
 |---|---|---|
 | 1. Money basics — monthly income, period start day, currency | `profiles`, `budget_periods` | no |
 | 2. First account — name, type, current balance | `accounts` | no |
-| 3. Savings target — monthly amount, optional first goal | `budget_periods`, `goals` | yes |
+| 3. Savings target — monthly amount, optional first goal (and its wallet) | `budget_periods`, `accounts`, `goals` | yes |
 | 4. Fixed costs — mark categories as `fixed`, set a rough total | `categories`, `budget_periods` | yes |
 
 Completion sets `profiles.onboarding_completed_at`. **Extensibility:** a fifth step is a new route
@@ -194,10 +197,10 @@ XP for tracking expenses, daily check-ins, goal contributions, budget reviews, a
 period under budget. One level per 100 XP. Streaks for consecutive check-ins. Ten achievements.
 
 **Shipping shape:** the tables and the award function exist from Milestone 1, because the signup
-trigger and the goal-contribution RPC both write through them. Every surface — the XP display, the
-streak, the check-in, the achievement list — lands in Milestone 9. A user therefore accrues XP
-before they can see it, which is deliberate: the first release is judged on whether the safe daily
-limit is trusted, not on whether a streak is showing.
+trigger writes a gamification profile. The award triggers and every surface — the XP display, the
+streak, the check-in, the achievement list — land together in Milestone 9. That is deliberate: the
+first release is judged on whether the safe daily limit is trusted, not on whether a streak is
+showing.
 
 Three guard rails, because gamification in a finance app fails in predictable ways:
 
@@ -237,7 +240,7 @@ Product health, not vanity. Recorded as business events carrying **no amounts**
 | Transactions logged per active week | is the ledger real? | ↑ |
 | Users with a budget set | is Plan reached? | ↑ |
 | Users returning in week 2 and week 4 | is the loop closing? | ↑ |
-| Goal contributions per goal per month | is Save reached? | ↑ |
+| Transfers into goal wallets per goal per month | is Save reached? | ↑ |
 | Share of periods finished under budget | **is the product working?** | ↑ |
 | Category correction rate | categorisation quality | ↓ |
 

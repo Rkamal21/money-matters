@@ -21,8 +21,9 @@ composite:
 foreign key (account_id, user_id) references public.accounts (id, user_id)
 ```
 
-Applied to twelve references across transactions, splits, budget limits, goals, contributions, and
-the category self-reference.
+Applied to ten references across transactions, splits, budget limits, goals, and the category
+self-reference. The goal's reference to its wallet also carries the account type, so the same FK
+asserts "must be a wallet" as well as ownership ([ADR-0026](./0026-goals-are-the-purpose-of-a-wallet.md)).
 
 ## Alternatives
 

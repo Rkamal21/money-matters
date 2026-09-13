@@ -64,10 +64,12 @@ and awards nothing. **XP is idempotent by construction**, not by client discipli
   type and dedupe key could have minted XP for events that never happened. `award_xp` is internal
   and carries no grant.
 - **The tables and `award_xp()` are created in Milestone 1, not Milestone 9.** `handle_new_user()`
-  writes a `gamification_profiles` row on signup, and `add_goal_contribution()` (M6) awards XP, so
-  both depend on the schema existing well before any gamification surface does. M9 adds the
-  product: the XP display, streaks, the check-in RPC, and the achievement catalog. Nothing
-  user-visible ships earlier; XP accrues before it is shown.
+  writes a `gamification_profiles` row on signup, so the schema must exist well before any
+  gamification surface does. M9 adds the product and the awards: the XP display, streaks, the
+  check-in RPC, `on_transaction_awards_xp()` — which also awards goal contributions and goal
+  achievement, since a contribution is a transfer
+  ([ADR-0026](./0026-goals-are-the-purpose-of-a-wallet.md)) — and the achievement catalog. Nothing
+  user-visible ships earlier.
 - `award_xp` is `SECURITY DEFINER` owned by a role holding `BYPASSRLS`, because
   `gamification_events` and `gamification_profiles` have no write policy at all
   ([ADR-0020](./0020-rls-execution-model.md)).

@@ -71,8 +71,8 @@ guards. The four-step onboarding wizard ([PRODUCT.md §8](./PRODUCT.md)). Settin
 
 **Database.** `profiles`; `categories` table, `set_category_slug()` and its policies (needed by the
 seed); **the four gamification tables plus `award_xp()` — schema only, no product surface, so that
-the signup trigger and the M6 contribution RPC are complete from the start** (ADR-0016; the
-surfaces land in M9); `handle_new_user()` creating profile + gamification profile + 12 seed
+the signup trigger is complete from the start** (ADR-0016; the award triggers and the surfaces land
+in M9); `handle_new_user()` creating profile + gamification profile + 12 seed
 categories in one transaction; `is_valid_timezone()`; `set_updated_at()`; RLS for every table
 created here.
 
@@ -237,39 +237,38 @@ trust it before making it clever.
 
 ## Milestone 6 — Savings goals
 
-**Scope.** Goal CRUD, archiving, the contribution ledger, contribution and withdrawal, progress,
-required rate, projected completion, goal history.
+**Scope.** Goal CRUD and archiving, each goal backed by one wallet (a new one, or an unused
+existing one). Contributing and withdrawing as transfers into and out of that wallet. Progress,
+sticky "reached", required rate, projected completion, and goal activity — which is the wallet's
+transaction list. See [ADR-0026](./adr/0026-goals-are-the-purpose-of-a-wallet.md).
 
-**Dependencies:** M2 (M4 for the "protect this month's contribution" hint).
+**Dependencies:** M2 — wallets are accounts and contributions are transfers (M4 for the "protect
+this month's contribution" hint).
 
-**Database.** `goals`; `goal_contributions`; `sync_goal_saved()` trigger (`SECURITY DEFINER` — it
-writes columns the caller cannot, see ADR-0020); `add_goal_contribution()` RPC;
-`recompute_goal_totals()`; column grants excluding `saved_minor` and `achieved_at` from **both**
-`INSERT` and `UPDATE` (ADR-0019).
+**Database.** `goals` with the type-pinned composite FK to `accounts (id, user_id, type)` and
+`UNIQUE (wallet_account_id)`; the `goal_progress` view (`security_invoker`); column grants with
+`wallet_account_id` insert-only and `wallet_account_type` in neither. No trigger, no RPC, no cache,
+and no `award_xp()` call — goal XP arrives with `on_transaction_awards_xp()` in M9.
 
-`add_goal_contribution()` calls `award_xp()`, which exists from M1, so the RPC is transactionally
-complete on first delivery. It does **not** call `evaluate_achievements()` — that function and the
-achievement catalog arrive in M9, and the RPC gains the call then. This is the one place where the
-"one transaction" guarantee is delivered in two steps, and it is recorded here rather than
-discovered later.
+**Domain.** `goals/calculateGoalProgress`, `calculateGoalPlan`, `projectGoalCompletion`, over the
+wallet's balance and its signed entries.
 
-**Domain.** `goals/calculateGoalProgress`, `calculateGoalPlan`, `projectGoalCompletion`.
-
-**Tests.** Trigger keeps `saved_minor = sum(contributions)` after insert, update, and delete.
-**20 concurrent contributions to one goal produce an exact total.** `saved_minor` is not writable
-by its owner (`42501`). `add_goal_contribution` on another user's goal returns the same error as a
-missing goal. Idempotency on `client_request_id`. Projection edge cases: one contribution, negative
-rate, already achieved. `recompute_goal_totals` repairs deliberate corruption.
+**Tests.** `goal_progress.balance_minor` equals the wallet's `account_balances` row after transfers
+in, transfers out, edits and soft deletes. `reached` survives spending the money; back-dating moves
+`reached_on`. **20 concurrent transfers into one wallet produce an exact balance.** A goal cannot
+point at a bank account or another user's wallet (`23503`), cannot share a wallet (`23505`), and
+cannot be re-pointed (`42501`); a wallet backing a goal cannot be retyped. Projection edge cases:
+one inflow, negative rate, already reached, reached then spent.
 
 **Acceptance criteria**
-- [ ] Goal progress cannot be set directly by any client request — on `INSERT` or on `UPDATE`
-- [ ] The contribution list explains the total exactly
-- [ ] Concurrent contributions never lose money
-- [ ] Reaching the target sets `achieved_at`, once. *(The `goal_achieved` achievement unlocks in M9,
-      when the catalog exists.)*
+- [ ] A goal's progress always equals its wallet's balance — there is no second number to disagree
+- [ ] Nothing but a transaction on the wallet can change goal progress
+- [ ] Moving money to a goal changes neither income nor expense
+- [ ] Spending the goal's money on its purpose leaves the goal achieved
 - [ ] A projection with insufficient data says so rather than inventing a date
 
-**Risks.** None significant — this milestone is the cleanest application of the ledger principle.
+**Risks.** One wallet per goal is the product constraint this design accepts. Watch for users who
+want two goals in one pot; the additive path is recorded in ADR-0026.
 
 ---
 
@@ -343,7 +342,8 @@ nothing about them is user-visible until this milestone.
 achievements). The schema dependency was satisfied in M1.
 
 **Database.** The four tables and `award_xp()` already exist from M1. This milestone adds
-`on_transaction_awards_xp()`, `evaluate_achievements()`, `recompute_xp_totals()`, the
+`on_transaction_awards_xp()` — which also awards `goal_contribution` for a transfer into a goal's
+wallet and `goal_achieved` when a goal is first reached (ADR-0026) — `evaluate_achievements()`, `recompute_xp_totals()`, the
 `daily_check_in()` RPC, and the `achievements` catalog rows. Grants are unchanged — `SELECT`-only
 on all four tables, set in M1.
 
@@ -516,7 +516,7 @@ M0 Foundation
          ├─ M3 Categories + categorisation
          │   └─ M4 Budget engine
          │       └─ M5 Safe daily limit
-         ├─ M6 Goals + contribution ledger
+         ├─ M6 Goals over wallets
          └───────┬───────────┘
                  └─ M7 Dashboard
                      ├─ M8 Analytics + rules insights

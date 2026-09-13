@@ -274,7 +274,7 @@ export interface SafeDailyLimitStrategy {
 
 MVP ships `EvenSpreadStrategy` (§3.2). Later candidates — `WeekendWeightedStrategy` (people spend
 more on Saturdays), `ForecastAwareStrategy` (reserve for the historical tail of the month),
-`GoalAwareStrategy` (protect this month's goal contributions) — implement the same interface and
+`GoalAwareStrategy` (protect this month's planned transfers into goal wallets) — implement the same interface and
 return the same result shape. The widget consumes `SafeDailyLimitResult` and never learns which
 strategy produced it. Strategy selection is a profile preference, so an A/B test is a config change.
 
@@ -333,37 +333,40 @@ The question the brief asks, answered explicitly:
 
 ## 5. Goals
 
+A goal is the purpose of one wallet. Every input below comes from that wallet's slice of the
+ledger: `balance` is its `account_balances` row, `reached` comes from the `goal_progress` view, and
+`entries` are its signed legs from `account_entries` ([ADR-0026](./adr/0026-goals-are-the-purpose-of-a-wallet.md)).
+
 ```ts
-calculateGoalProgress({ target, saved }): {
-  progressRatio: number;        // raw, may exceed 1
+calculateGoalProgress({ target, balance, reached }): {
+  progressRatio: number;        // raw balance / target; may exceed 1, may be negative
   displayRatio: number;         // clamped 0..1 for the progress bar
-  remaining: Money;             // max(0, target − saved)
-  isAchieved: boolean;
+  remaining: Money;             // max(0, target − balance)
+  isAchieved: boolean;          // = reached. Sticky: spending the money does not un-achieve it
 }
 
-calculateGoalPlan({ target, saved, targetDate, today }): {
+calculateGoalPlan({ target, balance, reached, targetDate, today }): {
   daysRemaining: number;
   requiredPerDay: Money; requiredPerWeek: Money; requiredPerMonth: Money;
   status: 'on_track' | 'behind' | 'achieved' | 'overdue' | 'no_target_date';
 }
 
-projectGoalCompletion({ target, saved, contributions, today, windowDays = 90 }):
+projectGoalCompletion({ target, balance, reached, entries, today, windowDays = 90 }):
   | { status: 'projected'; date: LocalDate; ratePerDay: Money; confidence: 'low' | 'medium' | 'high' }
   | { status: 'achieved' }
-  | { status: 'no_projection'; reason: 'no_contributions' | 'net_negative_rate' | 'too_few_points' }
+  | { status: 'no_projection'; reason: 'no_activity' | 'net_negative_rate' | 'too_few_points' }
 ```
 
-Edge cases, each tested: target already met (`achieved`, no projection); `targetDate` in the past
-and unmet (`overdue`); a single contribution (`too_few_points` — one point is not a rate, and
-inventing a projection from it is the kind of confident nonsense that destroys trust); withdrawals
-exceeding deposits in the window (`net_negative_rate`); `saved > target` (progress capped for
-display, real value reported); zero-length contribution history; a `target_date` today.
+Edge cases, each tested: target already met (`achieved`, no projection); **reached and then spent**
+(`balance < target`, `reached = true` → `achieved`, never `behind`); `targetDate` in the past and
+unmet (`overdue`); a single inflow (`too_few_points` — one point is not a rate, and inventing a
+projection from it is the kind of confident nonsense that destroys trust); outflows exceeding
+inflows in the window (`net_negative_rate`); `balance > target` (progress capped for display, real
+value reported); a negative wallet balance; an empty wallet history; a `target_date` today.
 
-**Progress is derived, cached, and recoverable.** `goals.saved_minor` is a trigger-maintained
-recompute of `sum(goal_contributions.amount_minor)`; the ledger is the source of truth; the client
-cannot write either — not on `UPDATE` and not at row creation
-([ADR-0019](./adr/0019-insert-column-grants.md)). Full four-part consistency treatment in
-[DATABASE.md §6.8](./DATABASE.md).
+**Progress is derived, not stored.** There is no goal total to cache, recompute or repair: the
+amount saved is the wallet's balance, and the wallet's balance is the ledger. Nothing a client
+sends can change it except a transaction on the wallet ([DATABASE.md §6.8](./DATABASE.md)).
 
 ---
 
@@ -397,7 +400,7 @@ Streak transition table (the v1 bug lived here — it compared a UTC date string
 |---|---|---|---|
 | `transaction_logged` | 5 | `tx:<uuid>` | 5 awards per civil day |
 | `daily_check_in` | 10 | `check_in:<date>` | once per day |
-| `goal_contribution` | 15 | `contrib:<uuid>` | 10 per day |
+| `goal_contribution` | 15 | `contrib:<transaction uuid>` | 10 per day. A transfer into a goal's wallet; awarded **instead of** `transaction_logged` for that row |
 | `budget_reviewed` | 5 | `review:<period>` | once per period |
 | `period_under_budget` | 50 | `under:<period>` | once per period, at close |
 | `goal_achieved` | 100 | `goal:<uuid>` | once ever |
@@ -428,7 +431,7 @@ Adding one is a catalog row plus a predicate — never a schema change.
 The layering the brief asks for, made explicit:
 
 ```
-Raw ledger            transactions, goal_contributions, gamification_events
+Raw ledger            transactions, gamification_events
    │                  (append-only facts; never mutated by analytics)
    ▼
 Aggregations          SQL. get_period_summary, sums by category / month / account.
@@ -494,4 +497,4 @@ on `domain/money`, `domain/period`, `domain/budget`, `domain/goals`, `domain/gam
 - **Regression tests named after v1's bugs**, so they can never come back:
   `safe-daily-limit does not divide by 30`, `today is user-local not UTC`,
   `streak survives a UTC/IST boundary`, `transfer does not count as expense`,
-  `goal total ignores a client-supplied saved amount`.
+  `goal progress equals its wallet balance`.

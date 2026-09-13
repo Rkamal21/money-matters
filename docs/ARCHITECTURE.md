@@ -15,7 +15,7 @@ each detail. Nothing is specified in two places.
 | [TESTING.md](./TESTING.md) | Unit / component / integration / RLS / E2E strategy and CI |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Git workflow, review rules, migration ownership, Definition of Done |
 | [ROADMAP.md](./ROADMAP.md) | Milestones 0–13 with scope, dependencies, acceptance criteria, risks |
-| [adr/](./adr/README.md) | 22 Architecture Decision Records |
+| [adr/](./adr/README.md) | 26 Architecture Decision Records |
 
 ---
 
@@ -128,13 +128,13 @@ These are **assumptions, not facts**. Each one, if wrong, changes the design. Ch
 Money Matters has an unusual constraint for a client-heavy app: **the numbers must be right, and the user must not be able to lie to the system about them.** That splits business logic into two categories that must be handled in two different places:
 
 - **Calculations** — "what is my safe daily limit?", "how far along is this goal?", "what level am I?". These are pure functions of data the user already owns. They can run in the browser. They must be pure, deterministic, and exhaustively tested.
-- **Invariants** — "goal progress equals the sum of its contributions", "XP is only awarded for real events", "a transaction amount is positive", "you cannot reference another user's category". These are *rules the client must not be trusted to enforce*. They belong in PostgreSQL, as constraints, triggers, and Row-Level Security.
+- **Invariants** — "goal progress is its wallet's ledger balance", "XP is only awarded for real events", "a transaction amount is positive", "you cannot reference another user's category". These are *rules the client must not be trusted to enforce*. They belong in PostgreSQL, as constraints, triggers, and Row-Level Security.
 
 v1 got this backwards: it computed in components and trusted the client to write derived state. The reboot's central rule is:
 
 > **Calculations live in a pure TypeScript domain layer. Invariants live in the database. Neither is duplicated in the other.**
 
-Where a value is both computed and stored (goal `saved_minor`), the ledger is the source of truth and a database trigger maintains the column; the client cannot write it at all.
+Where a value is both computed and stored (`gamification_profiles.xp_total`), its ledger is the source of truth and server-side code maintains the column; the client cannot write it at all. Goals store no amount: a goal is the purpose of a wallet, and its progress is that wallet's balance ([ADR-0026](./adr/0026-goals-are-the-purpose-of-a-wallet.md)).
 
 ### A.2 Layers
 
@@ -236,7 +236,7 @@ The escape hatch is the repository interface (§G.1): if we ever outgrow this, `
                     │  │  │ default; user_id = auth.uid())     │  │  │
                     │  │  ├────────────────────────────────────┤  │  │
                     │  │  │ CHECK constraints · composite FKs  │  │  │
-                    │  │  │ triggers (goal totals, XP, audit)  │  │  │
+                    │  │  │ triggers (splits, XP, audit)       │  │  │
                     │  │  │ SECURITY DEFINER RPCs (atomic ops) │  │  │
                     │  │  ├────────────────────────────────────┤  │  │
                     │  │  │ tables · indexes · migrations      │  │  │
@@ -323,15 +323,15 @@ Every choice below has a reason and a named alternative. Where the decision is g
 Full schema, ER diagram, constraints, indexes, and concurrency: **[DATABASE.md](./DATABASE.md)**.
 The shape in one page:
 
-**Fifteen tables.** `profiles`, `accounts`, `categories`, `transactions`, `transaction_splits`,
-`budget_periods`, `budget_category_limits`, `goals`, `goal_contributions`,
-`gamification_profiles`, `gamification_events`, `achievements`, `user_achievements`,
-`merchant_rules`, `audit_log`.
+**Fourteen tables.** `profiles`, `accounts`, `categories`, `transactions`, `transaction_splits`,
+`budget_periods`, `budget_category_limits`, `goals`, `gamification_profiles`,
+`gamification_events`, `achievements`, `user_achievements`, `merchant_rules`, `audit_log`.
 
-**Three views, no stored aggregates.** `account_entries` expands each transaction into signed legs
+**Four views, no stored aggregates.** `account_entries` expands each transaction into signed legs
 (a transfer produces two); `account_balances` sums them; `transaction_category_amounts` unifies
-split and un-split rows so every analytics query has one shape. All are `security_invoker = true`,
-so RLS still applies — a view without that flag is an RLS bypass.
+split and un-split rows so every analytics query has one shape; `goal_progress` reads each goal's
+progress straight off its wallet's balance. All are `security_invoker = true`, so RLS still
+applies — a view without that flag is an RLS bypass.
 
 **The eight decisions that shape everything else:**
 
@@ -342,11 +342,11 @@ so RLS still applies — a view without that flag is an RLS bypass.
 5. **Composite foreign keys `(id, user_id)`** make referencing another user's row a storage-layer error. ([ADR-0009](./adr/0009-composite-foreign-keys.md))
 6. **Enums for structure, tables for taxonomy.** `transaction_kind` is an enum; `categories` is a table.
 7. **Budgets have periods**, non-overlapping by an `EXCLUDE USING gist` constraint, so "which period is today in?" has exactly one answer.
-8. **The only denormalisation is `goals.saved_minor`**, recomputed (never incremented) by a trigger from an append-only ledger, with a documented repair function. ([ADR-0010](./adr/0010-goal-progress-trigger-maintained.md))
+8. **Goals hold no money.** There is one ledger. A wallet is a specialised account; a goal is the purpose of one wallet, and its progress is that wallet's derived balance — no second ledger, no goal total to keep in step. ([ADR-0026](./adr/0026-goals-are-the-purpose-of-a-wallet.md), superseding [ADR-0010](./adr/0010-goal-progress-trigger-maintained.md))
 
 **Idempotency and concurrency are schema features**, not application care: `client_request_id`
-unique per user on transactions and contributions; `dedupe_key` unique on gamification events;
-`FOR UPDATE` locks in the contribution RPC; optimistic concurrency on `updated_at` for edits.
+unique per user on transactions; `dedupe_key` unique on gamification events; `FOR UPDATE` locks in
+the RPCs that read-then-write; optimistic concurrency on `updated_at` for edits.
 
 ---
 
@@ -373,9 +373,10 @@ not how safe it is.
 - RLS `ENABLE` **and** `FORCE` on every table; **four explicit policies**, never `FOR ALL`; every
   `INSERT`/`UPDATE` policy has a `WITH CHECK` (v1's policies had none — a user could insert rows
   owned by someone else).
-- **Column-level grants** where RLS runs out: `goals.saved_minor`, `goals.achieved_at`, and
-  `gamification_profiles.xp_total` have no `UPDATE` grant, so tampering fails with `42501` before
-  RLS is consulted. This is four lines of DDL and it is the most important control in the system.
+- **Column-level grants** where RLS runs out: `gamification_profiles.xp_total`,
+  `categories.is_system` and `transactions.status` have no `INSERT` or `UPDATE` grant, so tampering
+  fails with `42501` before RLS is consulted. This is a few lines of DDL and it is the most
+  important control in the system. Goals need none for their progress: they store no amount.
 - `SECURITY DEFINER` functions always `SET search_path = ''`, always derive the caller from
   `auth.uid()`, and return **identical errors** for "not found" and "not yours".
 - `service_role` never leaves CI secrets and Edge Function env. CI greps the built bundle for it.
@@ -529,6 +530,7 @@ tests/
 /transactions/:id/edit   (modal route)
 /budget                  ?period=2026-09
 /goals   /goals/:id
+/wallets /wallets/:id      (a wallet is an account; its goal, if any, is shown, not merged — ADR-0026)
 /insights
 /settings                /settings/profile  /categories  /accounts  /security
 ```
@@ -616,6 +618,7 @@ Tokens in one place, consumed everywhere. Tailwind v4's `@theme` makes this a si
 Rules that keep it from drifting into a "crypto dashboard":
 
 1. **One accent colour.** Gradients only on the single hero number (safe daily limit), if at all.
+   The visual reference is the Financy fintech design (Figma, adopted 2026-09-12): ink on white cards over a light grey ground, section titles above their cards, list rows as individual cards, and a dark **inverse** card (`--color-inverse` with the `.theme-inverse` token set) for the hero number. Its six hues are **identity colours** (`--color-id-*`): icon tiles, small accents, progress fills and decoration only — never financial status, never a solid card background by default, and never stored in the database (derived from a stable id in the UI). Inter stays the one family; the reference’s payment-card details (numbers, holder names, expiry) are not reproduced.
 2. **Money is always `tabular-nums`** so columns align and digits don't jitter as values update.
 3. **Colour is never the only signal.** Over budget = red *and* an icon *and* text. Required for colour-blind users and for §17 contrast compliance.
 4. **Motion is functional.** Transitions ≤ 200ms, and every one respects `prefers-reduced-motion` (a `useReducedMotion` hook plus a global media query).
@@ -662,17 +665,23 @@ Between hooks and repositories, for operations with more than one step:
 // features/goals/services/contributeToGoal.ts
 export async function contributeToGoal(
   input: unknown,
-  deps: { goals: GoalRepository; clock: Clock },
-): Promise<Result<GoalContribution, AppError>> {
+  deps: { goals: GoalRepository; transactions: TransactionRepository },
+): Promise<Result<Transaction, AppError>> {
   const parsed = contributionSchema.safeParse(input);       // 1. validate
   if (!parsed.success) return err(validationError(parsed.error));
-  const amount = Money.fromMinor(parsed.data.amountMinor, parsed.data.currency);
-  if (amount.isZeroOrNegative()) return err(...);           // 2. domain rule
-  return deps.goals.addContribution({ ... });               // 3. one RPC = one txn
+  const goal = await deps.goals.getById(parsed.data.goalId); // 2. the goal names its wallet
+  if (!goal) return err(notFound('goal'));
+  return ok(await deps.transactions.create({                // 3. a contribution IS a transfer
+    kind: 'transfer',
+    accountId: parsed.data.fromAccountId,
+    counterAccountId: goal.walletAccountId,
+    amount: parsed.data.amount, occurredOn: parsed.data.occurredOn,
+    clientRequestId: parsed.data.clientRequestId,
+  }));
 }
 ```
 
-The service is pure orchestration and is unit-testable with fake repositories. Note step 3: the write is a **single RPC**, so contribution insert + goal total update + XP award + achievement check all happen in one Postgres transaction. Doing that as three client round-trips (v1's approach) leaves the database inconsistent whenever the network drops between calls.
+The service is pure orchestration and is unit-testable with fake repositories. Note step 3: a contribution is an ordinary transfer — one `INSERT` — so there is no contribution record to keep in step with the money and no RPC to make the two atomic. The goal's progress is its wallet's balance, which the transfer has already moved ([ADR-0026](./adr/0026-goals-are-the-purpose-of-a-wallet.md)). v1 did the equivalent as three client round-trips, which left the database inconsistent whenever the network dropped between calls.
 
 ### G.3 What runs where
 
@@ -680,7 +689,7 @@ The service is pure orchestration and is unit-testable with fake repositories. N
 |---|---|---|
 | Read transactions, budgets, goals, categories | PostgREST direct | RLS enforces ownership; no server logic needed. |
 | Create/update/delete a transaction | PostgREST direct | Constraints + RLS + composite FKs enforce every invariant. |
-| Add a goal contribution | **RPC** `add_goal_contribution` | Atomic across contribution + goal total + XP + achievement. |
+| Contribute to a goal | PostgREST direct — a transfer into the goal's wallet | It is an ordinary transaction; the ledger's constraints, RLS and composite FKs are all it needs. XP comes from the transaction trigger ([ADR-0026](./adr/0026-goals-are-the-purpose-of-a-wallet.md)). |
 | Award XP / update streak | **Trigger + internal function only** | Client must never write XP. There is no client-callable XP path at all; `award_xp` is internal. |
 | Period aggregates | **RPC** `get_period_summary` | Server-side aggregation, one round trip, no row dump. |
 | Close/roll a budget period | **RPC** `ensure_budget_period` | Idempotent, avoids a race on first load of a new month. |
@@ -763,7 +772,7 @@ The dashboard widget consumes `SafeDailyLimitResult`, which carries `{ limit, st
 | `CategoryRepository` | `list`, `create`, `update`, `archive`, `reorder` |
 | `TransactionRepository` | `list`, `getById`, `create`, `update`, `softDelete`, `sumByCategory`, `sumForPeriod` |
 | `BudgetRepository` | `getCurrent`, `ensurePeriod`, `upsertPlan`, `setCategoryLimit`, `removeCategoryLimit`, `getUsage` |
-| `GoalRepository` | `list`, `getById`, `create`, `update`, `archive`, `addContribution`, `listContributions` |
+| `GoalRepository` | `list`, `getById`, `create`, `update`, `archive` — contributions are transfers, written through `TransactionRepository` |
 | `GamificationRepository` | `getProfile`, `listAchievements`, `listUnlocked`, `checkIn` |
 | `MerchantRuleRepository` | `list`, `create`, `update`, `remove` |
 | `AnalyticsRepository` | `periodSummary`, `spendingOverTime`, `monthlyComparison`, `categoryTrends` |
@@ -892,25 +901,25 @@ product's hero number. Duplicating a money calculation in prose is the same mist
 **Savings goal contribution**
 
 ```
-User submits ContributionForm
+User submits ContributionForm  (goal, amount, from account)
   → Zod validate
-  → useAddContribution mutation → optimistic goal.saved += amount
+  → useContributeToGoal mutation → optimistic: wallet balance += amount, source −= amount
       → contributeToGoal service
-          → GoalRepository.addContribution()
-              → RPC add_goal_contribution()   ── single Postgres transaction ──┐
-                  1. assert goal.user_id = auth.uid(), lock it FOR UPDATE      │
-                  2. insert goal_contributions (amount validated per API §4)   │
-                  3. update goals.saved_minor = sum(contributions)             │
-                  4. if saved >= target → achieved_at = now(), else NULL       │
-                  5. award_xp(...) → gamification_events + xp_total (dedupe)   │
-                  6. evaluate + unlock achievements                            │
-                  7. insert audit_log                                          │
-              ←──────────────────────────────────────────────────────────────┘
-      → invalidate ['goals'], ['gamification'], ['achievements']
-  → GoalCard re-renders; if a level or achievement changed, a toast fires
+          → GoalRepository.getById()            → the goal's wallet_account_id
+          → TransactionRepository.create({ kind: 'transfer',
+                                           accountId: from, counterAccountId: wallet })
+              → POST /rest/v1/transactions   ── the same path as every transaction ──┐
+                  → RLS: user_id = auth.uid()                                        │
+                  → CHECK amount_minor > 0; composite FKs on both accounts           │
+                  → UNIQUE (user_id, client_request_id)                              │
+                  → trigger: audit_log row                                           │
+                  → trigger (M9): goal_contribution XP; goal_achieved if first reached │
+              ←──────────────────────────────────────────────────────────────────────┘
+      → invalidate ['transactions'], ['accounts'], ['goals'], ['period-summary'], ['gamification']
+  → GoalCard re-renders from goal_progress
 ```
 
-Steps 2–7 are atomic. In v1 the equivalent was three independent client calls, any of which could fail alone. Note there is **no `goals.status` write**: status is derived from `archived_at` and `saved_minor >= target_minor` (§R.1, [DATABASE.md §6.8](./DATABASE.md)).
+Nothing about the goal is written. Its progress is its wallet's balance, so it moved when the transfer did, and the transfer appears in neither income nor expense ([ADR-0017](./adr/0017-single-row-transfers-with-entry-view.md)). v1 did this as three independent client calls; the design before [ADR-0026](./adr/0026-goals-are-the-purpose-of-a-wallet.md) did it as an RPC keeping a second ledger in step. Both are gone. There is **no `goals.status` write** either: status is derived from `archived_at` and `goal_progress.reached` ([DATABASE.md §6.8](./DATABASE.md)).
 
 ---
 
@@ -1176,7 +1185,7 @@ M2  Accounts + ledger     ← the milestone everything downstream is arithmetic 
 M3  Categories + splits + merchant categorisation
 M4  Budget engine         periods, category limits, rollover, history
 M5  Safe daily limit      ← proves the schema was right (no database change)
-M6  Goals + contribution ledger
+M6  Goals over wallets      progress = the wallet's balance; contributions are transfers
 M7  Dashboard             ★ MVP SHIPS HERE
 M8  Analytics + rules insights
 M9  Gamification          surfaces only — XP/streak UI, check-in, achievements catalog
@@ -1239,7 +1248,7 @@ by accident.
 | [0007](./adr/0007-calculations-in-ts-invariants-in-postgres.md) | Calculations in TypeScript, invariants in PostgreSQL | The core layering rule; the thing most likely to erode |
 | [0008](./adr/0008-per-user-seeded-categories.md) | Per-user seeded categories instead of shared system rows | Non-obvious; a future developer will want to "normalise" it back |
 | [0009](./adr/0009-composite-foreign-keys.md) | Composite foreign keys `(id, user_id)` | Unusual technique; needs its rationale preserved |
-| [0010](./adr/0010-goal-progress-trigger-maintained.md) | Goal progress as a trigger-maintained cache over a ledger | Explains why `saved_minor` is not client-writable and why it is recomputed, not incremented |
+| [0010](./adr/0010-goal-progress-trigger-maintained.md) | Goal progress as a trigger-maintained cache over a ledger | **Superseded by 0026.** Kept for the recompute-not-increment reasoning, which still governs `xp_total` |
 | [0011](./adr/0011-react-router-over-tanstack-router.md) | React Router 7 over TanStack Router | A close call; record it so it is not relitigated |
 | [0012](./adr/0012-tanstack-query-only-state-library.md) | TanStack Query as the only state library at MVP | Documents the trigger for adding Zustand |
 | [0013](./adr/0013-trunk-based-branching.md) | Trunk-based branching now, `release/*` from Milestone 11 | Departs from the brief; the reasoning must survive |
@@ -1252,6 +1261,7 @@ by accident.
 | [0020](./adr/0020-rls-execution-model.md) | RLS execution model: `FORCE`, `BYPASSRLS`, definer and trigger privileges | Verified rather than assumed; its failure mode is silent, so it must not be rediscovered |
 | [0021](./adr/0021-safe-daily-limit-income-basis.md) | Safe daily limit income basis is `greater` | Supersedes assumption A9; the product's hero number |
 | [0022](./adr/0022-drop-regex-match-type.md) | `regex` dropped from `match_type` for the MVP | Records the direction of travel: adding an enum value is cheap, removing one is not |
+| [0026](./adr/0026-goals-are-the-purpose-of-a-wallet.md) | A goal is the purpose of a wallet; progress is the wallet's balance | Stops anyone reintroducing a goal balance beside the ledger; records why two goals cannot share a wallet |
 
 ---
 
@@ -1265,16 +1275,16 @@ different thing from one you have not noticed.
 ### R.1 Where can money become inconsistent?
 
 Almost nowhere, and that is by construction rather than by care: balances, budget spend, category
-totals, savings rate, and XP level are all **derived at read time**. There is exactly one stored
-derived value in the system.
+totals, savings rate, goal progress, and XP level are all **derived at read time**. The stored
+derived values are the two below, and neither is money.
 
 | Surface | Verdict |
 |---|---|
-| `goals.saved_minor` | The one denormalisation. Bounded by: recompute-not-increment, same transaction, `FOR UPDATE` lock, a CI test asserting equality after a randomised concurrent workload, and `recompute_goal_totals()` as a repair path |
-| `gamification_profiles.xp_total` | Same pattern over `gamification_events`; rebuilt by `recompute_xp_totals()` ([DATABASE.md §10](./DATABASE.md)). **FIXED:** this row claimed the total was "recomputable" for three drafts while no such function was ever listed. It is now named, owned, and `service_role`-only, symmetric with `recompute_goal_totals()` |
+| Goal progress | **Not stored — FIXED.** An earlier design kept `goals.saved_minor` as a cache over a separate `goal_contributions` ledger. That ledger could record a contribution with no transaction behind it, so a goal could report money no account held. Goals now store no amount: each is backed by one wallet and its progress is that wallet's balance ([ADR-0026](./adr/0026-goals-are-the-purpose-of-a-wallet.md)) |
+| `gamification_profiles.xp_total` | The one cache, over `gamification_events`. Bounded by recompute-not-increment, a CI test asserting equality after concurrent writes, and `recompute_xp_totals()` as a repair path ([DATABASE.md §10](./DATABASE.md)). **FIXED:** this row claimed the total was "recomputable" for three drafts while no such function was ever listed. It is now named, owned, and `service_role`-only |
 | `transactions.is_split` | A boolean that only selects a query shape. Trigger-maintained, and now absent from the client's INSERT grant as well as its UPDATE grant. **FIXED:** while `is_split` was insertable, a client could set it `true` with no split rows — `enforce_split_total()` is a constraint trigger on `transaction_splits`, so with zero children it never fires. The row then joins `transaction_category_amounts` with a `NULL` category, which is a wrong number in every category breakdown, not a slower query |
 | Everything else | Derived. Cannot drift |
-| **FIXED** | An earlier draft had a `goals.status` column *and* `saved_minor` *and* `target_minor` — three facts that could disagree. `status` is now derived from `archived_at` and `saved >= target`. Likewise `profiles.level` (v1 stored it) is now a pure function |
+| **FIXED** | An earlier draft had a `goals.status` column *and* `saved_minor` *and* `target_minor` — three facts that could disagree. `status` is now derived from `archived_at` and `goal_progress.reached`. Likewise `profiles.level` (v1 stored it) is now a pure function |
 
 ### R.2 Where can a malicious client manipulate data?
 
@@ -1282,8 +1292,9 @@ Walked the attack surface as an authenticated user with a valid token and full r
 
 | Attempt | Blocked by |
 |---|---|
-| `PATCH /goals {saved_minor}` | No column `UPDATE` grant → `42501` |
-| `POST /goals {saved_minor: target}` | No column `INSERT` grant → `42501`. **FIXED:** column grants covered `UPDATE` only until [ADR-0019](./adr/0019-insert-column-grants.md); a goal could be *born* complete, and `sync_goal_saved()` fires on contributions, so nothing would ever correct it |
+| `PATCH /goals {saved_minor}` · `POST /goals {saved_minor: target}` | **No such column.** A goal stores no amount; progress is its wallet's ledger balance, which moves only through `transactions` ([ADR-0026](./adr/0026-goals-are-the-purpose-of-a-wallet.md)) |
+| `PATCH /goals {wallet_account_id: <a fuller wallet>}` | Not in the `UPDATE` grant → `42501` |
+| `POST /goals {wallet_account_id: <a bank account, or someone else's wallet>}` | Type-pinned composite FK → `23503` |
 | `POST /categories {is_system: true}` · `POST /transactions {status, source, is_split}` | Same fix, same mechanism |
 | `PATCH /gamification_profiles {xp_total}` | No table write grant at all |
 | `POST /transactions {user_id: victim}` | `WITH CHECK` on INSERT |
@@ -1293,7 +1304,7 @@ Walked the attack surface as an authenticated user with a valid token and full r
 | Replaying a captured `daily_check_in` 100× | `UNIQUE (user_id, dedupe_key)` |
 | Spoofing `p_today` to inflate a streak | Server clamps the increment and bounds the date |
 | Editing a closed budget period | RLS policy includes `closed_at IS NULL` |
-| Calling an RPC with another user's id | Every **client-callable** RPC derives `auth.uid()`. Two internal functions do take a user id — `evaluate_achievements(p_user_id)` and `recompute_goal_totals(p_user_id)` — and neither is granted to `authenticated`; the grant, not the signature, is the control, and CI asserts no `authenticated`-executable function takes one ([SECURITY.md §4.5 rule 2, §8.2](./SECURITY.md)) |
+| Calling an RPC with another user's id | Every **client-callable** RPC derives `auth.uid()`. Two internal functions do take a user id — `evaluate_achievements(p_user_id)` and `recompute_xp_totals(p_user_id)` — and neither is granted to `authenticated`; the grant, not the signature, is the control, and CI asserts no `authenticated`-executable function takes one ([SECURITY.md §4.5 rule 2, §8.2](./SECURITY.md)) |
 | **Remaining** | A user can tamper with their *own* displayed calculations in their own browser. Accepted and recorded — nothing of ours depends on that output, and "fixing" it by moving arithmetic into RPCs would make the UI slow for no security gain |
 
 ### R.3 Where can duplicate transactions occur?
@@ -1367,7 +1378,7 @@ Asked honestly, with a bias toward cutting:
 ### R.8 What happens when two requests arrive at once?
 
 Enumerated in [DATABASE.md §12](./DATABASE.md) and integration-tested, including 20 parallel
-contributions to one goal asserting an exact total. The design uses `READ COMMITTED` with row locks
+transfers into one goal's wallet asserting an exact balance. The design uses `READ COMMITTED` with row locks
 and unique constraints rather than `SERIALIZABLE`, because no RPC performs a read-then-write that a
 unique index or `FOR UPDATE` does not already protect — a claim the concurrency tests exist to
 falsify.
@@ -1454,16 +1465,19 @@ whether the aggregate wants its own covering index.
 | Policies referencing another table without care | Avoided: every policy is `user_id = (select auth.uid())`. No policy performs a subquery against another user-owned table, so there is no policy-evaluation-order surprise |
 | `RLS ENABLE` without `FORCE` | Would exempt the table owner — and migrations run as the owner. Both are set, CI-asserted. **Corrected:** an earlier draft also credited `FORCE` with stopping a `SECURITY DEFINER` bypass. It does not — the owning role holds `BYPASSRLS`, which defeats `FORCE`, and that is precisely what lets the trigger-maintained columns work. Verified execution model in [ADR-0020](./adr/0020-rls-execution-model.md) |
 | A `SECURITY DEFINER` function owned by a role **without** `BYPASSRLS` | **The most dangerous failure mode found in this review.** Its `UPDATE`s match zero rows and return success — no error, a silently wrong total — and its `SELECT`s are filtered, so a recompute reads an empty ledger and writes `0`. Guarded by a CI query asserting every definer function's owner holds `rolbypassrls` |
-| A trigger function that writes a protected column without `SECURITY DEFINER` | Fails `42501` and rolls back the user's whole write. Loud rather than silent, but still broken. Both `sync_goal_saved()` and `enforce_split_total()` are definer for this reason |
+| A trigger function that writes a protected column without `SECURITY DEFINER` | Fails `42501` and rolls back the user's whole write. Loud rather than silent, but still broken. `enforce_split_total()` and `award_xp()` are definer for this reason |
 | A new table with no policy | The highest-probability future failure. Mitigated by generating the RLS test matrix from a table list and by a CI query for `relrowsecurity = false` |
 
 ### R.15 Which denormalised fields could become inconsistent?
 
-Exactly two (`goals.saved_minor`, `gamification_profiles.xp_total`), both caches over their
-ledgers, both recomputed rather than incremented, both with a named repair function
-(`recompute_goal_totals()` and `recompute_xp_totals()`, [DATABASE.md §10](./DATABASE.md)), both
-with a CI test asserting equality after concurrent writes. Plus `transactions.is_split`, now
-protected on insert as well as update (§R.1).
+Exactly one cache: `gamification_profiles.xp_total`, over the `gamification_events` ledger,
+recomputed rather than incremented, with a named repair function (`recompute_xp_totals()`,
+[DATABASE.md §10](./DATABASE.md)) and a CI test asserting equality after concurrent writes. Plus
+`transactions.is_split`, now protected on insert as well as update (§R.1).
+
+**Removed:** `goals.saved_minor`, which was a cache over a second, contribution ledger. Goal
+progress is now the wallet's balance and cannot drift
+([ADR-0026](./adr/0026-goals-are-the-purpose-of-a-wallet.md)).
 
 **FIXED in this pass:** `budget_periods` originally carried a generated `label` column; `to_char`
 on a date is `STABLE`, not `IMMUTABLE`, so PostgreSQL rejects it in a generated column. The label is

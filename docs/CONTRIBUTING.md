@@ -63,7 +63,7 @@ main ─────●────●────●────●────
 ```
 feature/<milestone>-<slug>     feature/m2-transaction-crud
 fix/<slug>                     fix/streak-timezone-comparison
-db/<slug>                      db/add-goal-contributions      ← anything with a migration
+db/<slug>                      db/add-goals                   ← anything with a migration
 docs/<slug>                    docs/adr-0005-money-representation
 chore/<slug>                   chore/upgrade-vite-7
 ```
@@ -84,7 +84,7 @@ changelog entry.
 ```
 <type>(<scope>): <subject>
 
-feat(goals): add contribution ledger and progress trigger
+feat(goals): back each goal with a wallet
 fix(budget): use the user's timezone when resolving the current period
 db(transactions): add a partial unique index on client_request_id
 test(domain): cover the safe-daily-limit zero-days edge case

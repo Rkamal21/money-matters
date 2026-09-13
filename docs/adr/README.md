@@ -20,7 +20,7 @@ edited; they are superseded by a new one that links back.
 | [0007](./0007-calculations-in-ts-invariants-in-postgres.md) | Calculations in TypeScript, invariants in PostgreSQL | Proposed |
 | [0008](./0008-per-user-seeded-categories.md) | Per-user seeded categories instead of shared system rows | Proposed |
 | [0009](./0009-composite-foreign-keys.md) | Composite foreign keys `(id, user_id)` for cross-tenant integrity | Proposed |
-| [0010](./0010-goal-progress-trigger-maintained.md) | Goal progress as a trigger-maintained cache over an append-only ledger | Proposed |
+| [0010](./0010-goal-progress-trigger-maintained.md) | Goal progress as a trigger-maintained cache over an append-only ledger | Superseded by [0026](./0026-goals-are-the-purpose-of-a-wallet.md) |
 | [0011](./0011-react-router-over-tanstack-router.md) | React Router 7 over TanStack Router | Proposed |
 | [0012](./0012-tanstack-query-only-state-library.md) | TanStack Query as the only state library at MVP | Proposed |
 | [0013](./0013-trunk-based-branching.md) | Trunk-based branching now; `release/*` from Milestone 11 | Proposed |
@@ -36,6 +36,7 @@ edited; they are superseded by a new one that links back.
 | [0023](./0023-default-categories-generated-from-seed.md) | The default-category list lives in `seed.sql`; everything else is generated from it | **Accepted** |
 | [0024](./0024-money-arithmetic-lint-is-a-heuristic.md) | The money-arithmetic lint rule is a name-matching guardrail, not financial analysis | **Accepted** |
 | [0025](./0025-hosting-on-vercel.md) | Hosting on Vercel | **Accepted** |
+| [0026](./0026-goals-are-the-purpose-of-a-wallet.md) | A goal is the purpose of a wallet; its progress is the wallet's ledger balance | **Accepted** |
 
 ## Writing a new one
 

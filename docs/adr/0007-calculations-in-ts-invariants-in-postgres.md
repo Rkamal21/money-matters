@@ -14,13 +14,14 @@ Split business logic by **what it is**, not by where it is convenient:
 
 - **Calculations** — safe daily limit, goal progress, level from XP, budget usage, savings rate.
   Pure functions of data the user already owns. They live in `src/domain/` as pure TypeScript.
-- **Invariants** — goal progress equals the sum of its contributions; XP is only awarded for real
+- **Invariants** — goal progress is its wallet's ledger balance; XP is only awarded for real
   events; an amount is positive; a category belongs to you. Rules the client must not be trusted
-  to enforce. They live in PostgreSQL as constraints, triggers, grants, and RLS.
+  to enforce. They live in PostgreSQL as constraints, views, triggers, grants, and RLS.
 
 **Neither is duplicated in the other.** Where a value is both computed and stored
-(`goals.saved_minor`), the ledger is the source of truth and a trigger maintains the column; the
-client cannot write it at all.
+(`gamification_profiles.xp_total`), the ledger is the source of truth and server-side code maintains
+the column; the client cannot write it at all. Goal progress is no longer stored anywhere
+([ADR-0026](./0026-goals-are-the-purpose-of-a-wallet.md)).
 
 ## Alternatives
 
