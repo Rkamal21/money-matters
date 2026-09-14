@@ -30,3 +30,12 @@ android/app/build/
 android/build/
 android/.gradle/
 .idea/
+
+# Test and build output
+coverage/
+playwright-report/
+test-results/
+
+# Supabase CLI local state
+supabase/.temp/
+supabase/.branches/
