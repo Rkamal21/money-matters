@@ -50,7 +50,16 @@ export function toMoneyOrNull(value: string, currency: string): Money | null {
 
 /** An idempotency key, generated once per form submission (DATABASE.md §12). */
 export function newRequestId(): string {
-  return crypto.randomUUID()
+  // `randomUUID` exists only in secure contexts (https, localhost). A phone
+  // opening the dev server over the local network is neither, so there the
+  // same RFC 4122 v4 UUID is built from `getRandomValues`, which is not
+  // restricted.
+  if (globalThis.isSecureContext) return crypto.randomUUID()
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40 // version 4
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80 // RFC 4122 variant
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
 export const emailField = z
