@@ -455,6 +455,16 @@ extension points were real.** Adds `record_transaction_review()` RPC.
 requested at opt-in with a clear explanation. **Never log the body. Never store the body. Never
 transmit the body.** Local queue encrypted (SQLCipher / `EncryptedSharedPreferences`).
 
+**Own-account transfers arrive as two messages.** Moving money between two of the user's own
+banks produces a debit message from one and a credit message from the other (observed with real
+SBI → Airtel Payments Bank messages). Each parses correctly on its own, as an expense and as an
+income, so confirming both would count the amount as spending *and* as income. The review step
+must pair them — same amount, opposite directions, dates within a day or two — and offer to record
+one `transfer` instead ([ADR-0017](./adr/0017-single-row-transfers-with-entry-view.md)).
+**The references cannot make the match:** in the observed pair, SBI's `Refno` and Airtel's
+`Txn ID` for the same transfer differed. The parser (`domain/transactions/ingest/`) deliberately
+returns both candidates unchanged; pairing needs both messages, so it belongs after parsing.
+
 **Tests.** Parser fixtures for 10+ real Indian bank/UPI formats (HDFC, ICICI, SBI, Axis, Paytm,
 PhonePe, GPay) plus malformed, truncated, multi-part, and promotional messages that must **not**
 parse. Duplicate detection: exact and fuzzy. A privacy test asserting no log line and no persisted
@@ -465,6 +475,8 @@ row contains the message body. Nothing reaches `confirmed` without an explicit u
 - [ ] No message body is logged, stored, or transmitted, ever
 - [ ] Every ingested transaction requires explicit confirmation
 - [ ] Duplicates are flagged, not silently dropped
+- [ ] A transfer between the user's own accounts (a debit message plus a credit message) can be
+      recorded once, as a transfer, rather than as an expense and an income
 - [ ] A malformed message is discarded without a crash and without a log
 - [ ] The app is fully usable if the SMS permission is denied
 
