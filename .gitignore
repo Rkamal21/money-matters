@@ -12,6 +12,8 @@ dist
 dist-ssr
 *.local
 .env
+# Safe defaults for supabase/config.toml's env() values — no secrets (see the file itself).
+!supabase/.env
 
 # Editor directories and files
 .vscode/*

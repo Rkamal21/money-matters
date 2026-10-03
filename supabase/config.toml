@@ -195,7 +195,8 @@ password_requirements = ""
 
 [auth.rate_limit]
 # Number of emails that can be sent per hour. Requires auth.email.smtp to be enabled.
-email_sent = 2
+# 30 rather than 2 so a local SMTP set-up can be tested; hosted projects set their own limit.
+email_sent = 30
 # Number of SMS messages that can be sent per hour. Requires auth.sms to be enabled.
 sms_sent = 30
 # Number of anonymous sign-ins that can be made per hour per IP address. Requires enable_anonymous_sign_ins = true.
@@ -222,7 +223,11 @@ enable_signup = true
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
 # If enabled, users need to confirm their email address before signing in.
-enable_confirmations = true
+# Off for the local stack only: its mail never leaves the mail catcher, so a confirmation link
+# can't reach a real inbox or be opened on a phone. Hosted projects keep confirmation on
+# (Authentication → Sign In / Providers → Email in the Supabase dashboard); this file does not
+# configure them.
+enable_confirmations = false
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
 secure_password_change = false
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
@@ -232,15 +237,17 @@ otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 3600
 
-# Use a production-ready SMTP server
-# [auth.email.smtp]
-# enabled = true
-# host = "smtp.sendgrid.net"
-# port = 587
-# user = "apikey"
-# pass = "env(SENDGRID_API_KEY)"
-# admin_email = "admin@email.com"
-# sender_name = "Admin"
+# Real email delivery for the local stack, off unless supabase/.env.local (gitignored) sets the
+# MM_SMTP_* values — see README "Real email in local development". Without them, mail goes to the
+# local mail catcher as before. Hosted projects configure SMTP in the Supabase dashboard instead.
+[auth.email.smtp]
+enabled = "env(MM_SMTP_ENABLED)"
+host = "env(MM_SMTP_HOST)"
+port = 587
+user = "env(MM_SMTP_USER)"
+pass = "env(MM_SMTP_PASS)"
+admin_email = "env(MM_SMTP_ADMIN_EMAIL)"
+sender_name = "Money Matters"
 
 # Uncomment to customize email template
 # [auth.email.template.invite]

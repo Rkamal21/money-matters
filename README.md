@@ -76,7 +76,9 @@ Sign in as the seeded demo user — two months of realistic data:
 | ------------------------- | ------------------- |
 | `demo@moneymatters.local` | `demo-password-123` |
 
-Or sign up: the confirmation email lands in the local mail catcher at http://127.0.0.1:54324.
+Or sign up: the local stack skips email confirmation, so a new account signs in straight away.
+Password-reset emails land in the local mail catcher at http://127.0.0.1:54324, unless you turn on
+real email (below).
 
 #### Testing on a phone
 
@@ -89,6 +91,38 @@ Vite prints the address to open on the phone. On a Windows Mobile Hotspot, for e
 in development, `src/data/supabase/client.ts` swaps `127.0.0.1` for the address the page was
 loaded from. Plain `npm run dev` stays on `localhost`, so the dev server is not exposed to every
 network the PC joins.
+
+#### Real email in local development
+
+Out of the box the local stack sends no real email — everything goes to the mail catcher. To have
+password-reset emails reach real inboxes while you develop, send them through your Gmail:
+
+1. Turn on 2-Step Verification for the Google account, then create an app password at
+   https://myaccount.google.com/apppasswords.
+2. Edit `supabase/.env.local` (gitignored; created from the template below if missing): set
+   `MM_SMTP_ENABLED=true`, your Gmail address in `MM_SMTP_USER` and `MM_SMTP_ADMIN_EMAIL`, and the
+   16-letter app password, without spaces, in `MM_SMTP_PASS`.
+3. Restart the stack: `npm run db:stop && npm run db:start`.
+
+```bash
+# supabase/.env.local
+MM_SMTP_ENABLED=true
+MM_SMTP_HOST=smtp.gmail.com
+MM_SMTP_USER=your.address@gmail.com
+MM_SMTP_PASS=abcdabcdabcdabcd
+MM_SMTP_ADMIN_EMAIL=your.address@gmail.com
+```
+
+`supabase/.env` (committed) holds the defaults that keep SMTP off, so CI and a fresh checkout still
+use the mail catcher. Local sending is capped at 30 emails an hour (`auth.rate_limit.email_sent`).
+This only affects the local stack: a hosted project sets its SMTP in the Supabase dashboard.
+
+**Local development only — password reset works on the PC, not on a phone.** When you test on a
+phone over the local network (`npm run dev:phone`), sign-up, sign-in and sign-out work, but
+a reset link does not: the link points at `127.0.0.1`, and local Auth refuses to send a user back
+to an IP address other than `127.0.0.1`, so it returns to `http://localhost:5173`. Both of those
+mean the phone itself. Request and open reset links on the PC. This is a property of the local
+stack only; a hosted project uses its real domain for both, and email confirmation stays on there.
 
 **Never point local development at the production Supabase project.** A migration applied by
 accident is not reversible. The integration suite refuses any host that is not local; the `.env`
