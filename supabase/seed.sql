@@ -138,7 +138,7 @@ begin
   insert into public.budget_category_limits (user_id, budget_period_id, category_id, limit_minor)
   select v_user, v_period, c.id, x.limit_minor
     from (values
-      ('food', 800000), ('shopping', 500000), ('transport', 400000), ('entertainment', 200000)
+      ('food', 200000), ('shopping', 500000), ('transport', 400000), ('entertainment', 200000)
     ) as x (slug, limit_minor)
     join public.categories c on c.user_id = v_user and c.slug = x.slug;
 
