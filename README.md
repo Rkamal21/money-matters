@@ -64,6 +64,12 @@ VITE_SUPABASE_ANON_KEY=<ANON_KEY from supabase status>
 npm run dev                  # http://localhost:5173
 ```
 
+`npm run dev` first makes sure local Supabase is answering (`scripts/ensure-local-supabase.mjs`).
+If Docker Desktop or the stack is down — after a reboot, for instance — it starts them and waits.
+Existing data is kept; nothing is reset or reseeded. Without this, every request would fail and
+sign-in would say "You appear to be offline", which is about the stack, not your network. A
+hosted Supabase URL skips the check.
+
 Sign in as the seeded demo user — two months of realistic data:
 
 | Email                     | Password            |
@@ -71,6 +77,18 @@ Sign in as the seeded demo user — two months of realistic data:
 | `demo@moneymatters.local` | `demo-password-123` |
 
 Or sign up: the confirmation email lands in the local mail catcher at http://127.0.0.1:54324.
+
+#### Testing on a phone
+
+```bash
+npm run dev:phone            # npm run dev, also served on your local network
+```
+
+Vite prints the address to open on the phone. On a Windows Mobile Hotspot, for example, that is
+`http://192.168.137.1:5173`. The phone reaches local Supabase at the same address on port 54321:
+in development, `src/data/supabase/client.ts` swaps `127.0.0.1` for the address the page was
+loaded from. Plain `npm run dev` stays on `localhost`, so the dev server is not exposed to every
+network the PC joins.
 
 **Never point local development at the production Supabase project.** A migration applied by
 accident is not reversible. The integration suite refuses any host that is not local; the `.env`
@@ -110,7 +128,8 @@ a 10-character minimum password, and your site URL in the redirect allow-list.
 
 | Script                                      | Does                                                                  |
 | ------------------------------------------- | --------------------------------------------------------------------- |
-| `npm run dev`                               | Vite dev server                                                       |
+| `npm run dev`                               | Starts Docker and local Supabase if needed, then the Vite dev server  |
+| `npm run dev:phone`                         | The same, also served on the local network for a phone                |
 | `npm run build`                             | Category-constant check, `tsc -b`, then production build              |
 | `npm run typecheck`                         | `tsc --noEmit`                                                        |
 | `npm run lint` / `lint:fix`                 | ESLint, including the layer boundaries                                |
