@@ -2,6 +2,7 @@ import { lazy, Suspense, type ComponentType, type ReactNode } from 'react'
 import { Link, Navigate, Route, Routes, useLocation, type Location } from 'react-router'
 
 import { Skeleton } from '@/components/ui/States'
+import { IS_DEV } from '@/config/env'
 import { usePageTitle } from '@/hooks/usePageTitle'
 
 import { PublicOnly, RequireAuth, RequireOnboarding } from './guards'
@@ -81,6 +82,22 @@ const SecuritySettingsPage = page(
   () => import('@/features/settings/routes/SecuritySettingsPage'),
   'SecuritySettingsPage',
 )
+
+const DetectedTransactionsPage = page(
+  () => import('@/features/transactions/detection/DetectedTransactionsPage'),
+  'DetectedTransactionsPage',
+)
+
+/**
+ * Development only. `IS_DEV` is the constant `false` in a production build, so
+ * the route and its chunk are dropped from the bundle entirely — not hidden.
+ */
+const TransactionDetectionDevPage = IS_DEV
+  ? page(
+      () => import('@/features/transactions/detection/TransactionDetectionDevPage'),
+      'TransactionDetectionDevPage',
+    )
+  : null
 
 function PageFallback() {
   return (
@@ -311,6 +328,32 @@ export function AppRoutes() {
                   </Lazy>
                 }
               />
+              <Route
+                path="/detected"
+                element={
+                  <Lazy>
+                    <DetectedTransactionsPage />
+                  </Lazy>
+                }
+              />
+              <Route
+                path="/detected/:id"
+                element={
+                  <Lazy>
+                    <DetectedTransactionsPage />
+                  </Lazy>
+                }
+              />
+              {TransactionDetectionDevPage !== null ? (
+                <Route
+                  path="/dev/transaction-detection"
+                  element={
+                    <Lazy>
+                      <TransactionDetectionDevPage />
+                    </Lazy>
+                  }
+                />
+              ) : null}
               <Route path="*" element={<NotFoundPage />} />
             </Route>
           </Route>

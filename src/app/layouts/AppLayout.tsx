@@ -12,6 +12,7 @@ import {
   Trophy,
   Wallet,
 } from 'lucide-react'
+import { lazy, Suspense } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router'
 
 import { Avatar } from '@/components/ui/Avatar'
@@ -21,6 +22,11 @@ import { BrandMark } from '@/components/ui/Splash'
 import { useProfile } from '@/data/queries'
 import { cn } from '@/lib/cn'
 import { useTheme } from '@/lib/theme'
+
+// Its own chunk: the Capacitor runtime stays out of the initial bundle (ARCHITECTURE.md §L).
+const DetectionListener = lazy(async () => ({
+  default: (await import('@/features/transactions/detection/DetectionListener')).DetectionListener,
+}))
 
 /**
  * The signed-in shell. Mobile-first (ARCHITECTURE.md §F.5 rule 6): a bottom
@@ -172,6 +178,9 @@ export function AppLayout() {
           <ErrorBoundary resetKey={location.pathname} title="This page could not be shown">
             <Outlet />
           </ErrorBoundary>
+          <Suspense fallback={null}>
+            <DetectionListener />
+          </Suspense>
         </main>
 
         {/* Bottom tab bar, below lg */}

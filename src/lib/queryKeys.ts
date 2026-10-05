@@ -12,6 +12,9 @@ export const queryKeys = {
   transactions: (filter?: unknown) =>
     filter === undefined ? (['transactions'] as const) : (['transactions', filter] as const),
   transaction: (id: string) => ['transactions', 'detail', id] as const,
+  /** "Was this submission already saved?" — under `transactions`, so every ledger write refreshes it. */
+  transactionByRequest: (clientRequestId: string) =>
+    ['transactions', 'by-request', clientRequestId] as const,
   periodSummary: (from?: string, to?: string) =>
     from === undefined ? (['period-summary'] as const) : (['period-summary', from, to] as const),
   budget: (periodKey?: string) =>
@@ -26,6 +29,8 @@ export const queryKeys = {
   dashboard: (today?: string) =>
     today === undefined ? (['dashboard'] as const) : (['dashboard', today] as const),
   analytics: (...parts: readonly unknown[]) => ['analytics', ...parts] as const,
+  /** The device's queue of SMS-detected candidates awaiting review (platform/sms). */
+  smsDetections: () => ['sms-detections'] as const,
 } as const
 
 /**

@@ -639,6 +639,27 @@ describe('10. fingerprints on candidates', () => {
     expect(a.fingerprint.value).toBe(b.fingerprint.value)
   })
 
+  it('keys an SMS with no reference by its send time: one SMS, one key', () => {
+    const text = 'Rs 1,250.00 spent on card XX1234 at AMAZON on 03-10-26'
+    const first = candidate(text, { sentAt: 1_790_000_000_000 })
+    expect(first.fingerprint.basis).toBe('message')
+    // The same SMS delivered twice is one transaction…
+    expect(candidate(text, { sentAt: 1_790_000_000_000 }).fingerprint.value).toBe(
+      first.fingerprint.value,
+    )
+    // …but a second, identically worded ₹1,250 payment is not collapsed into it.
+    expect(candidate(text, { sentAt: 1_790_000_360_000 }).fingerprint.value).not.toBe(
+      first.fingerprint.value,
+    )
+  })
+
+  it('keys by the bank reference, whatever the send time', () => {
+    const text = 'Rs 500 paid to SWIGGY. UPI Ref 427612345678'
+    expect(candidate(text, { sentAt: 1 }).fingerprint).toEqual(
+      candidate(text, { sentAt: 2 }).fingerprint,
+    )
+  })
+
   it('tells two different payments apart', () => {
     const a = candidate('Rs 500 paid to SWIGGY on 03-10-26')
     expect(candidate('Rs 501 paid to SWIGGY on 03-10-26').fingerprint.value).not.toBe(
@@ -975,5 +996,48 @@ describe('privacy, purity and the ledger boundary', () => {
         )
       }
     }
+  })
+})
+
+describe('payment-app notifications — the same parser, title and text joined', () => {
+  // Invented examples in the shapes payment apps use; Android joins a
+  // notification's title and text with ". " (PaymentNotificationListener).
+  it.each([
+    ['₹486 paid to Swiggy. Paid from HDFC Bank ••1234', 'expense', 'INR 486', 'Swiggy'],
+    ['Payment successful. Paid ₹486 to Swiggy', 'expense', 'INR 486', 'Swiggy'],
+    ['You paid ₹486.00 to Swiggy', 'expense', 'INR 486', 'Swiggy'],
+    ['Your payment of Rs.486.00 to Swiggy is successful', 'expense', 'INR 486', 'Swiggy'],
+    ['₹150 sent to Amit Kumar. Paid via UPI', 'expense', 'INR 150', 'Amit Kumar'],
+    ['₹500 received from Amit Kumar. Credited to SBI ••1234', 'income', 'INR 500', 'Amit Kumar'],
+    ['Amit Kumar paid you ₹500', 'income', 'INR 500', 'Amit Kumar'],
+    ['Money received. Amit Kumar paid you ₹500', 'income', 'INR 500', 'Amit Kumar'],
+    ['Money received. Received ₹500 from Amit Kumar', 'income', 'INR 500', 'Amit Kumar'],
+  ])('%s', (text, kind, amount, merchant) => {
+    const found = candidate(text)
+    expect(found.kind).toBe(kind)
+    expect(amountOf(found)).toBe(amount)
+    expect(found.merchant).toBe(merchant)
+  })
+
+  it('keeps a reference the notification shows', () => {
+    expect(candidate('₹486 paid to Swiggy. UPI Ref No. 412345678901').reference).toContain(
+      '412345678901',
+    )
+  })
+
+  it.each([
+    ['Get ₹100 cashback on your next recharge. Pay now!', 'promotional'],
+    ['You won a scratch card worth up to ₹50', 'promotional'],
+    ['Your electricity bill of ₹486 is due on 10 Oct', 'not_completed'],
+    ['Amit Kumar requested ₹500. Tap to pay', 'not_completed'],
+    ['Reminder: pay ₹500 to Amit Kumar', 'not_completed'],
+    ['Payment of ₹486 to Swiggy failed', 'failed'],
+    ['Your wallet balance is ₹1,250', 'balance_only'],
+  ])('is not a transaction: %s', (text, reason) => {
+    expect(rejection(text)).toBe(reason)
+  })
+
+  it('does not take a title for the payer', () => {
+    expect(candidate('Money received. Amit Kumar paid you ₹500').merchant).toBe('Amit Kumar')
   })
 })

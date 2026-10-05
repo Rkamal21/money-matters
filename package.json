@@ -30,7 +30,8 @@
     "db:start": "supabase start",
     "db:stop": "supabase stop",
     "db:reset": "supabase db reset",
-    "cap:sync": "npm run build && cap sync",
+    "build:sms-parser": "node scripts/build-sms-parser.mjs",
+    "cap:sync": "npm run build && npm run build:sms-parser && cap sync",
     "cap:android": "cap open android",
     "prepare": "husky"
   },

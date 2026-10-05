@@ -468,12 +468,13 @@ returns both candidates unchanged; pairing needs both messages, so it belongs af
 **Tests.** Parser fixtures for 10+ real Indian bank/UPI formats (HDFC, ICICI, SBI, Axis, Paytm,
 PhonePe, GPay) plus malformed, truncated, multi-part, and promotional messages that must **not**
 parse. Duplicate detection: exact and fuzzy. A privacy test asserting no log line and no persisted
-row contains the message body. Nothing reaches `confirmed` without an explicit user action.
+row contains the message body. Nothing uncertain reaches the ledger without an explicit user action.
 
 **Acceptance criteria**
 - [ ] The core web app works fully with the feature absent — no dependency in either direction
 - [ ] No message body is logged, stored, or transmitted, ever
-- [ ] Every ingested transaction requires explicit confirmation
+- [ ] Every uncertain ingested transaction requires explicit confirmation; a clear one is added
+      automatically, with Undo and an off switch (ADR-0015, amended 2026-10-04)
 - [ ] Duplicates are flagged, not silently dropped
 - [ ] A transfer between the user's own accounts (a debit message plus a credit message) can be
       recorded once, as a transfer, rather than as an expense and an income

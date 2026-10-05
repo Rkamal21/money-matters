@@ -49,6 +49,12 @@ describe('sha256Hex — FIPS 180-4 test vectors', () => {
     }
   })
 
+  it('encodes a lone surrogate as U+FFFD, as TextEncoder does — it needs no Web API', () => {
+    for (const text of ['\uD800', 'a\uDC00b', '\uDBFF\uDBFF']) {
+      expect(sha256Hex(text)).toBe(createHash('sha256').update(text, 'utf8').digest('hex'))
+    }
+  })
+
   it('agrees with node:crypto on arbitrary strings, across every block boundary', () => {
     fc.assert(
       fc.property(fc.string({ unit: 'binary', maxLength: 300 }), (text) => {
@@ -82,6 +88,21 @@ describe('fingerprintKey — the canonical, versioned key', () => {
     ).toBe('v1|fields|expense|INR:48600|-|-|-')
   })
 
+  it('keys an SMS with no reference by its send time', () => {
+    expect(fingerprintKey({ ...base, messageSentAt: 1_790_000_000_000 })).toBe(
+      'v1|message|1790000000000|expense|INR:48600|swiggy|1234',
+    )
+    expect(
+      fingerprintKey({ ...base, merchantRaw: null, accountLast4: null, messageSentAt: 1 }),
+    ).toBe('v1|message|1|expense|INR:48600|-|-')
+  })
+
+  it('still prefers the bank reference to the send time', () => {
+    expect(
+      fingerprintKey({ ...base, reference: '427612345678', messageSentAt: 1_790_000_000_000 }),
+    ).toBe('v1|ref|427612345678|expense|INR:48600')
+  })
+
   it('treats a merchant that normalises to nothing as missing', () => {
     expect(fingerprintKey({ ...base, merchantRaw: 'UPI 4276123' })).toBe(
       'v1|fields|expense|INR:48600|2026-10-03|-|1234',
@@ -98,8 +119,18 @@ describe('fingerprintOf — duplicate detection', () => {
 
   it('names its basis', () => {
     expect(fingerprintOf({ ...base, reference: '427612345678' }).basis).toBe('reference')
+    expect(fingerprintOf({ ...base, messageSentAt: 1_790_000_000_000 }).basis).toBe('message')
+    expect(fingerprintOf({ ...base, messageSentAt: null }).basis).toBe('fields')
     expect(fingerprintOf(base).basis).toBe('fields')
     expect(fingerprintOf({ ...base, occurredOn: null }).basis).toBe('fields_undated')
+  })
+
+  it('collapses a re-delivered SMS, but not a second identically worded payment', () => {
+    const delivered = fingerprintOf({ ...base, messageSentAt: 1_790_000_000_000 })
+    const redelivered = fingerprintOf({ ...base, messageSentAt: 1_790_000_000_000 })
+    const secondPayment = fingerprintOf({ ...base, messageSentAt: 1_790_000_420_000 })
+    expect(redelivered.value).toBe(delivered.value)
+    expect(secondPayment.value).not.toBe(delivered.value)
   })
 
   it('is deterministic', () => {

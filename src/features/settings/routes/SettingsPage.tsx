@@ -1,6 +1,7 @@
 import {
   ChevronRight,
   LogOut,
+  MessageSquareText,
   Palette,
   Shapes,
   ShieldCheck,
@@ -18,6 +19,7 @@ import { repositories } from '@/data/repositories'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useSession } from '@/lib/session'
 import { type ThemePreference, useTheme } from '@/lib/theme'
+import { smsCapture } from '@/platform/sms/smsCapture'
 
 const SECTIONS = [
   {
@@ -100,6 +102,28 @@ export function SettingsPage() {
                   <span className="block text-sm font-medium text-text">Progress</span>
                   <span className="block truncate text-xs text-text-muted">
                     Streak, level and achievements
+                  </span>
+                </span>
+                <ChevronRight aria-hidden="true" className="size-5 text-text-muted" />
+              </Link>
+            </li>
+          )}
+          {smsCapture.isAndroid() && (
+            <li>
+              <Link
+                to="/detected"
+                className="flex min-h-16 items-center gap-3 px-4 hover:bg-surface-2/60"
+              >
+                <span
+                  aria-hidden="true"
+                  className="inline-flex size-10 items-center justify-center rounded-full bg-brand/10 text-brand"
+                >
+                  <MessageSquareText className="size-5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium text-text">Detected transactions</span>
+                  <span className="block truncate text-xs text-text-muted">
+                    Payments found in bank SMS, waiting for review
                   </span>
                 </span>
                 <ChevronRight aria-hidden="true" className="size-5 text-text-muted" />

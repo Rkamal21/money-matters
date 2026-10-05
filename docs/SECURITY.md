@@ -510,10 +510,11 @@ select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 
 ---
 
-## 9. Future: bank SMS privacy requirements
+## 9. Bank SMS and payment-app privacy requirements
 
-These are binding constraints on Milestone 12, recorded now because v1 violated four of the six and
-the code is still in the repository.
+Binding constraints on Milestone 12 (built: [SMS-CAPTURE.md](./SMS-CAPTURE.md)), first recorded
+because v1 violated four of the six. They cover every message source — bank SMS, payment-app
+notifications and the inbox import — not SMS alone.
 
 1. **Never log the message body.** v1: `Log.i(TAG, "…| message=$body")` wrote complete bank SMS —
    account fragments, balances, merchant history — to Logcat, readable during any debugging session
@@ -524,13 +525,22 @@ the code is still in the repository.
 3. **Never transmit the body.** Parsing is on-device. Only extracted fields sync.
 4. **Encrypt what little is stored locally.** SQLCipher or `EncryptedSharedPreferences` for the
    pending-review queue.
-5. **Least-privilege permission.** `RECEIVE_SMS` is a Google Play *restricted* permission requiring
-   a declaration and an approved use case. **Action for Milestone 0: remove `RECEIVE_SMS` and the
-   receiver from the manifest**, since the feature is not built and its presence alone risks
-   rejection of any store submission. Ask for it at the moment the user opts in, explain why, and
-   let the app work fully without it.
-6. **Never auto-trust a parse.** Every ingested row lands as `pending_review` and requires an
-   explicit user confirmation before it affects a single number.
+5. **Least-privilege permission.** `RECEIVE_SMS` and `READ_SMS` are Google Play *restricted*
+   permissions requiring a declaration and an approved use case. Each permission is asked for at
+   the moment the user opts into the feature that needs it — `RECEIVE_SMS` for detection,
+   `READ_SMS` only for "Import past messages", Notification access only for payment apps — after
+   an in-app disclosure, and the app works fully without any of them. (Milestone 0 removed v1's
+   unused `RECEIVE_SMS`; Milestone 12 re-added it with the feature.)
+6. **Never auto-trust an uncertain parse.** *(Amended 2026-10-04, ADR-0015.)* A detection is added
+   without a tap only when its type, amount, payee, category (a rule at ≥ 0.9 confidence), date and
+   account are all certain and nothing in the ledger makes it look like a repeat or half of an
+   own-account transfer; it is added through the ordinary write path, its notification offers
+   Undo, and the user can turn this off. Everything else waits for an explicit confirmation before
+   it affects a single number. Unconfirmed detections stay in the device's encrypted queue — they
+   are never uploaded.
+7. **Read only what the feature needs.** A notification listener sees every notification on the
+   phone; only those from an allow-list of payment and bank apps (`PaymentApps.java`) are read,
+   and everything else is dropped before its content is touched. Messaging apps are never on it.
 
 Plus the receiver hardening from T19: require `BROADCAST_SMS` on the receiver and allow-list sender
 addresses, so another app cannot inject fabricated transactions.

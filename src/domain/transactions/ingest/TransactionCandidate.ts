@@ -43,10 +43,12 @@ export interface CandidateConfidence {
  * from extracted fields — never from the message body.
  *
  *   reference       the bank's own transaction reference was found
+ *   message         no reference, but the SMS centre's send time: one SMS, one key —
+ *                   a re-delivery shares it, an identically worded second payment does not
  *   fields          amount, direction, date, merchant and account
  *   fields_undated  as above with no date: a weak key, which a review must treat as such
  */
-export type FingerprintBasis = 'reference' | 'fields' | 'fields_undated'
+export type FingerprintBasis = 'reference' | 'message' | 'fields' | 'fields_undated'
 
 export interface TransactionFingerprint {
   /** SHA-256 of the canonical key, as 64 lower-case hex characters. */

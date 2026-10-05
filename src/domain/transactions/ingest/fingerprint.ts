@@ -14,13 +14,17 @@ import type { CandidateDirection, TransactionFingerprint } from './TransactionCa
  * statement row:
  *
  *   with a reference   v1|ref|<REFERENCE>|<direction>|<CUR>:<minor>
- *   without one        v1|fields|<direction>|<CUR>:<minor>|<date>|<merchant>|<last4>
+ *   an SMS without one v1|message|<sent at>|<direction>|<CUR>:<minor>|<merchant>|<last4>
+ *   anything else      v1|fields|<direction>|<CUR>:<minor>|<date>|<merchant>|<last4>
  *
  * Choices that keep the key stable:
  *   - The amount and direction stay in the reference key, because a reversal
  *     or refund often quotes the original transaction's reference.
- *   - The time of day is left out: a statement row rarely has one, and the key
- *     has to match across sources.
+ *   - An SMS with no reference is keyed by the SMS centre's send time. A
+ *     re-delivered SMS keeps that time, so it collapses into one; two separate
+ *     ₹1,250 card payments at the same shop, worded identically, do not.
+ *   - Otherwise the time of day is left out: a statement row rarely has one,
+ *     and the key has to match across sources.
  *   - The merchant is the normalised text, not a rule's label, so editing a
  *     rule can never change an existing key.
  *
@@ -35,6 +39,8 @@ export interface FingerprintInput {
   readonly occurredOn: LocalDate | null
   readonly merchantRaw: string | null
   readonly accountLast4: string | null
+  /** The SMS centre's send time (epoch ms), when the source is an SMS. */
+  readonly messageSentAt?: number | null
 }
 
 const MISSING = '-'
@@ -45,6 +51,18 @@ export function fingerprintKey(input: FingerprintInput): string {
     return ['v1', 'ref', input.reference.toUpperCase(), input.direction, amount].join('|')
   }
   const merchant = normalizeMerchant(input.merchantRaw ?? '')
+  const sentAt = input.messageSentAt ?? null
+  if (sentAt !== null) {
+    return [
+      'v1',
+      'message',
+      String(sentAt),
+      input.direction,
+      amount,
+      merchant === '' ? MISSING : merchant,
+      input.accountLast4 ?? MISSING,
+    ].join('|')
+  }
   return [
     'v1',
     'fields',
@@ -62,8 +80,10 @@ export function fingerprintOf(input: FingerprintInput): TransactionFingerprint {
     basis:
       input.reference !== null
         ? 'reference'
-        : input.occurredOn !== null
-          ? 'fields'
-          : 'fields_undated',
+        : (input.messageSentAt ?? null) !== null
+          ? 'message'
+          : input.occurredOn !== null
+            ? 'fields'
+            : 'fields_undated',
   }
 }

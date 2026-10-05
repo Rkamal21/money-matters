@@ -858,6 +858,14 @@ export type Database = {
       is_valid_timezone: { Args: { p_tz: string }; Returns: boolean }
       period_remaining_minor: { Args: { p_period_id: string }; Returns: number }
       recompute_xp_totals: { Args: { p_user_id?: string }; Returns: number }
+      record_transaction_origin: {
+        Args: {
+          p_message_at?: string
+          p_source: Database["public"]["Enums"]["transaction_source"]
+          p_transaction_id: string
+        }
+        Returns: boolean
+      }
       replace_transaction_splits: {
         Args: {
           p_category_id?: string
@@ -923,6 +931,7 @@ export type Database = {
         | "bank_sync"
         | "recurring"
         | "system"
+        | "notification"
       transaction_status:
         | "detected"
         | "pending_review"
@@ -1081,6 +1090,7 @@ export const Constants = {
         "bank_sync",
         "recurring",
         "system",
+        "notification",
       ],
       transaction_status: [
         "detected",

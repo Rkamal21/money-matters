@@ -37,8 +37,36 @@ const K = wordsOf(ROUND_CONSTANTS)
 
 const rotr = (x: number, n: number): number => (x >>> n) | (x << (32 - n))
 
+/**
+ * UTF-8 by hand. `TextEncoder` is a Web API, and the parser also runs inside
+ * Android's JavaScriptSandbox (platform/sms), which offers only ECMAScript. A
+ * lone surrogate becomes U+FFFD, exactly as `TextEncoder` encodes it.
+ */
+function utf8(text: string): number[] {
+  const bytes: number[] = []
+  for (const char of text) {
+    const point = char.codePointAt(0) as number
+    const code = point >= 0xd800 && point <= 0xdfff ? 0xfffd : point
+    if (code < 0x80) {
+      bytes.push(code)
+    } else if (code < 0x800) {
+      bytes.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f))
+    } else if (code < 0x10000) {
+      bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f))
+    } else {
+      bytes.push(
+        0xf0 | (code >> 18),
+        0x80 | ((code >> 12) & 0x3f),
+        0x80 | ((code >> 6) & 0x3f),
+        0x80 | (code & 0x3f),
+      )
+    }
+  }
+  return bytes
+}
+
 export function sha256Hex(text: string): string {
-  const bytes = new TextEncoder().encode(text)
+  const bytes = utf8(text)
   // Message, the 0x80 marker, zero padding, then the bit length in the last 8 bytes.
   const paddedLength = Math.ceil((bytes.length + 9) / 64) * 64
   const message = new Uint8Array(paddedLength)

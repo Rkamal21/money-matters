@@ -47,6 +47,12 @@ export interface ParseMessageInput {
   readonly categories: readonly Pick<Category, 'slug' | 'kind'>[]
   /** The day the message arrived, from the source adapter. Used when the text has no date. */
   readonly receivedOn?: LocalDate
+  /**
+   * For an SMS: the SMS centre's send time, epoch ms, from the source adapter.
+   * It tells a re-delivered SMS (same time) from a second, identically worded
+   * payment (another time) when the message carries no bank reference.
+   */
+  readonly sentAt?: number
 }
 
 /** Longer than any multi-part bank SMS; anything bigger is not one. */
@@ -188,6 +194,10 @@ const PAYEE_IN = /\b(?:from|by)\s+(?:(?:vpa|upi\s+id|m\/s\.?)\s+)?/gi
 /** ICICI: "Acct XX123 debited for Rs 500.00 on 03-Oct-26; SWIGGY credited." */
 const PAYEE_BEFORE_CREDITED =
   /(?<=(?:^|;\s*|\.\s+))[a-z0-9&@'*][a-z0-9&@'*._/ -]{1,40}?(?=\s+credited\b)/gi
+
+/** Payment apps: "Amit Kumar paid you ₹500", "Amit sent you ₹200" — the payer comes first. */
+const PAYER_BEFORE_YOU =
+  /(?<=(?:^|[.;:!]\s+))[a-z][a-z0-9&' -]{1,40}?(?=\s+(?:has\s+)?(?:paid|sent)\s+you\b)/gi
 
 /** Axis / HDFC "UPI/P2M/427612345678/SWIGGY": the reference, then the payee. */
 const UPI_PATH =
@@ -398,6 +408,7 @@ export function parseTransactionMessage(input: ParseMessageInput): ParseMessageR
         occurredOn,
         merchantRaw,
         accountLast4,
+        messageSentAt: input.sentAt ?? null,
       }),
     },
   }
@@ -476,6 +487,12 @@ function payeeOf(
     for (const match of text.matchAll(PAYEE_BEFORE_CREDITED)) {
       const payee = validPayee(match[0].trim())
       if (payee !== null) return payee
+    }
+  }
+  if (kind === 'income') {
+    for (const match of text.matchAll(PAYER_BEFORE_YOU)) {
+      const payer = validPayee(match[0].trim())
+      if (payer !== null) return payer
     }
   }
   const prefixes =

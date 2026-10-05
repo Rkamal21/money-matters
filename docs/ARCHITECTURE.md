@@ -1101,7 +1101,9 @@ and we say so — that is the test of whether the extension point was real.
 
 **Binding privacy constraints** ([SECURITY.md §9](./SECURITY.md)): never log the body, never persist
 the body, never transmit the body, encrypt the local queue, require `BROADCAST_SMS` on the receiver,
-allow-list senders, never auto-confirm a parse. The core web app has **no dependency** on any of
+allow-list senders, never add an *uncertain* parse on its own (amended 2026-10-04: clear ones are
+added automatically, with Undo — ADR-0015). As built, detections wait in an encrypted on-device
+queue rather than as `pending_review` rows; see [SMS-CAPTURE.md](./SMS-CAPTURE.md). The core web app has **no dependency** on any of
 this in either direction.
 
 ### M.4 Future AI insights — the extension point

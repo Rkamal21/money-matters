@@ -1,6 +1,6 @@
 # ADR-0015 — SMS ingestion is optional and policy-gated; fallbacks ranked
 
-Status: **Proposed** · Date: 2026-09-07
+Status: **Proposed**, amended 2026-10-04 · Date: 2026-09-07
 
 ## Context
 
@@ -64,3 +64,38 @@ help, and it can block a release.
 - Privacy constraints for any future implementation are binding and listed in SECURITY.md §9:
   never log the body, never store the body, never transmit the body, encrypt the local queue,
   require `BROADCAST_SMS` on the receiver, allow-list senders, and never auto-confirm a parse.
+
+## Amendment — 2026-10-04: built, and automatic
+
+At the owner's direction Milestone 12 was **built before the Play Console declaration was filed**
+(decision 3 above). The declaration is still required before any release that contains the
+permissions; if it is refused, the fallbacks below stand and the feature ships disabled.
+
+The owner also asked that expenses not need typing at all, and chose:
+
+1. **Clear detections are added automatically.** "Never auto-confirm a parse" becomes "never add an
+   *uncertain* parse on its own". A detection is added without a tap only when nothing needs a
+   person: type, amount in the ledger currency, payee, a category from a rule at ≥ 0.9 confidence
+   (the form's own pre-fill threshold), a date, and an account — the one whose last digits the
+   message shows, or the user's only bank account — are all certain, and the ledger holds nothing
+   with the same amount and type within a day (a typed entry, a repeat) and no opposite movement of
+   the same amount on another account within two days (half of an own-account transfer). The rules
+   are one pure module (`domain/transactions/ingest/autoAdd.ts`). Safeguards: the write is the
+   entry form's own `saveTransaction`, idempotent on a key derived from the message; the
+   notification says "added" and offers **Undo**; a switch turns it off; everything else waits for
+   review, where confirming teaches the payee's category so its next payment is clear.
+2. **Payment-app notifications are a second source**, not a fallback — several banks no longer send
+   SMS for small UPI payments. A notification listener reads only an allow-list of payment and bank
+   apps, behind its own disclosure. One payment's SMS and notification are paired and kept once.
+3. **Past messages can be imported** once, with `READ_SMS` (covered by the same SMS-based money
+   management declaration), behind its own disclosure. An imported payment older than its account
+   is absorbed into the opening balance by `record_transaction_origin`, atomically, so today's
+   balance stays what the user entered.
+
+Detections wait in an encrypted on-device queue and reach the ledger only as ordinary confirmed
+inserts; `pending_review` rows, `dedupe_hash` and `record_transaction_review` turned out not to be
+needed. Unconfirmed financial data never leaves the phone. `transactions.source` now records
+provenance (`sms`, `notification`, `import`). The ledger write needs the app running: a message
+that arrives while it is closed is queued and notified, and added the moment the app opens —
+native code would need the user's session, and sharing its rotating refresh token risks signing
+them out.

@@ -51,6 +51,7 @@ export type {
   NewTransaction,
   SplitPart,
   TransactionFilter,
+  TransactionOrigin,
   TransactionPatch,
 } from './TransactionRepository'
 export type { Page } from './types'

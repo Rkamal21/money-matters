@@ -339,14 +339,26 @@ Streak transition computed in SQL from `last_check_in_on`. Clamps to at most one
 manipulated device clock cannot manufacture a streak. Idempotent per day via
 `dedupe_key = 'check_in:' || p_today`.
 
-### `record_transaction_review` *(Milestone 12)*
+### `record_transaction_origin` *(Milestone 12)*
 
 ```sql
-record_transaction_review(p_transaction_id uuid, p_decision text) returns public.transactions
+record_transaction_origin(
+  p_transaction_id uuid,
+  p_source public.transaction_source,   -- 'sms' | 'notification' | 'import'
+  p_message_at timestamptz default null  -- when the bank sent it; imports only
+) returns boolean
 ```
 
-`p_decision ∈ {confirm, reject, duplicate}`. Moves an ingested row out of `pending_review`, records
-the decision for parser feedback, and awards XP only on `confirm`.
+Called once a detected transaction has been saved through the ordinary insert
+(`TransactionRepository.recordOrigin`). Acts only on the caller's own, undeleted row still marked
+`'manual'`, so it is idempotent: a second call answers `false` and changes nothing. For
+`'import'` with `p_message_at` earlier than the account's `created_at`, it also adds the
+transaction's effect back onto `opening_balance_minor` (an expense raises it, income and refunds
+lower it) in the same transaction — the typed opening balance already contained that payment.
+Wallets and transfers are never adjusted. Errors: `28000` signed out, `22023` any other source.
+
+There is no review RPC: detections wait in the device's encrypted queue, not as `pending_review`
+rows, and reach the ledger only as ordinary confirmed inserts ([ADR-0015](./adr/0015-sms-ingestion-policy-gated.md)).
 
 ### `recompute_xp_totals` *(maintenance)*
 

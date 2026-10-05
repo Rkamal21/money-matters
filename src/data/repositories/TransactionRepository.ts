@@ -66,6 +66,9 @@ export interface SplitPart {
   readonly note?: string | null
 }
 
+/** Where a detected transaction came from (`transactions.source`, server-owned). */
+export type TransactionOrigin = 'sms' | 'notification' | 'import'
+
 export interface TransactionRepository {
   list(
     userId: string,
@@ -74,6 +77,11 @@ export interface TransactionRepository {
     limit?: number,
   ): Promise<Page<Transaction>>
   getById(userId: string, id: string): Promise<Transaction | null>
+  /**
+   * The row a submission already wrote, deleted or not — what `create` returns
+   * on a repeat, readable beforehand so a caller can say "already added".
+   */
+  findByClientRequestId(userId: string, clientRequestId: string): Promise<Transaction | null>
   create(userId: string, input: NewTransaction): Promise<Transaction>
   update(id: string, patch: TransactionPatch, expectedUpdatedAt?: string): Promise<Transaction>
   softDelete(id: string): Promise<void>
@@ -82,6 +90,13 @@ export interface TransactionRepository {
   replaceSplits(id: string, parts: readonly SplitPart[], fallbackCategoryId?: string): Promise<void>
   /** Signed entries on one account since a date — a goal wallet's activity (ADR-0026). */
   accountEntries(userId: string, accountId: string, since: LocalDate): Promise<WalletEntry[]>
+  /**
+   * Records where a saved detection came from — once (`record_transaction_origin`).
+   * An imported message sent (`messageAt`, epoch ms) before its account existed
+   * also moves the opening balance, in the same database transaction, so today's
+   * balance stays what the user typed. `false`: already recorded, or not found.
+   */
+  recordOrigin(id: string, origin: TransactionOrigin, messageAt?: number | null): Promise<boolean>
 }
 
 /** PostgREST's logical-filter syntax reserves these; a search term may not smuggle them in. */
@@ -202,7 +217,7 @@ export class SupabaseTransactionRepository implements TransactionRepository {
     return data === null ? null : mapTransaction(data)
   }
 
-  private async byClientRequestId(
+  async findByClientRequestId(
     userId: string,
     clientRequestId: string,
   ): Promise<Transaction | null> {
@@ -241,7 +256,7 @@ export class SupabaseTransactionRepository implements TransactionRepository {
         error.code === '23505' &&
         `${error.message} ${error.details}`.includes('tx_client_request_uk')
       ) {
-        const existing = await this.byClientRequestId(userId, input.clientRequestId)
+        const existing = await this.findByClientRequestId(userId, input.clientRequestId)
         if (existing !== null) return existing
       }
       fail(error, { operation: 'insert', entity: 'transaction' })
@@ -304,6 +319,20 @@ export class SupabaseTransactionRepository implements TransactionRepository {
       ...(fallbackCategoryId === undefined ? {} : { p_category_id: fallbackCategoryId }),
     })
     if (error) fail(error, { operation: 'rpc', entity: 'transaction' })
+  }
+
+  async recordOrigin(
+    id: string,
+    origin: TransactionOrigin,
+    messageAt: number | null = null,
+  ): Promise<boolean> {
+    const { data, error } = await this.db.rpc('record_transaction_origin', {
+      p_transaction_id: id,
+      p_source: origin,
+      ...(messageAt === null ? {} : { p_message_at: new Date(messageAt).toISOString() }),
+    })
+    if (error) fail(error, { operation: 'rpc', entity: 'transaction' })
+    return data === true
   }
 
   async accountEntries(

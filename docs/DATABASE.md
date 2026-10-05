@@ -246,7 +246,7 @@ create type public.account_type            as enum ('cash','bank','savings','wal
 create type public.category_kind           as enum ('expense','income');
 create type public.category_treatment      as enum ('fixed','variable','excluded');
 create type public.transaction_kind        as enum ('expense','income','transfer','refund');
-create type public.transaction_source      as enum ('manual','sms','import','bank_sync','recurring','system');
+create type public.transaction_source      as enum ('manual','sms','import','bank_sync','recurring','system','notification');
 create type public.transaction_status      as enum ('detected','pending_review','confirmed','rejected','duplicate');
 create type public.match_type              as enum ('contains','prefix','exact');
                                            -- 'regex' deliberately absent: ADR-0022
@@ -839,7 +839,7 @@ Signatures, errors, and authorization in [API.md §4](./API.md).
 | `get_period_summary(p_from date, p_to date)` | Server-side aggregation: income/expense/fixed/variable totals plus per-category sums in one result set, instead of shipping rows to the browser to `reduce`. |
 | `get_dashboard_snapshot(p_today date)` | One round trip for the whole dashboard — period, plan, totals, budget usage, goal summaries, gamification. Removes a 7-request waterfall on the slowest screen on the slowest network. |
 | `daily_check_in(p_today date)` | The streak transition is computed in SQL from `last_check_in_on`; the function clamps to at most one increment and rejects a `p_today` outside a narrow window around the server date, so a client cannot inflate a streak. |
-| `record_transaction_review(p_transaction_id, p_decision)` | *(Milestone 12)* Confirm/reject an ingested transaction atomically with its dedupe bookkeeping. |
+| `record_transaction_origin(p_transaction_id, p_source, p_message_at)` | *(Milestone 12, as built)* `source` is server-owned, so a detected transaction — written by `saveTransaction` like any other — is born `'manual'`. This records `'sms'`, `'notification'` or `'import'` once, and for an imported message sent before its account existed moves `opening_balance_minor` by the same amount **in the same statement transaction**, so today's balance stays what the user typed and a retry cannot double the shift. Two client writes could not be atomic. |
 | `delete_my_account()` | *(Edge Function, service role)* Cascade-delete every row and the auth user itself. |
 
 ---
@@ -852,7 +852,7 @@ Signatures, errors, and authorization in [API.md §4](./API.md).
 | **The same transaction submitted twice** (double tap, retry, two devices) | `client_request_id` is generated once per form submission and reused across retries. `UNIQUE (user_id, client_request_id)` turns the second write into a `23505`, which the repository maps to "already saved" and returns the existing row. Idempotency, not after-the-fact deduplication. |
 | **Two edits to the same transaction** | Optimistic concurrency on `updated_at`: `UPDATE … WHERE id = $1 AND updated_at = $2`. Zero rows ⇒ `conflict` ⇒ the UI shows "this changed elsewhere; reload". Last-write-wins is not acceptable on money. |
 | **Two devices creating this month's budget** | `ensure_budget_period` plus the `EXCLUDE USING gist` overlap constraint. Worst case, one transaction gets `23P01` and retries into the winner's row. |
-| **Duplicate SMS/import** *(future)* | `dedupe_hash` partial unique index, plus a fuzzy pass (same amount, same account, `occurred_on` within one day, similar merchant) that marks the newer row `status='duplicate'` rather than dropping it — a wrong dedupe decision must be visible and reversible. |
+| **Duplicate SMS/notification/import** *(Milestone 12, as built)* | Exact: the confirmation's `client_request_id` is derived from the message's fingerprint, so `UNIQUE (user_id, client_request_id)` writes one row however often the message arrives or is confirmed. Fuzzy: a detection with the same amount and type within a day of an existing row is never added automatically — it waits for review with a warning, so a wrong decision is a person's, visible and reversible. On the device, seen fingerprints and the bank-SMS/payment-app pairing (docs/SMS-CAPTURE.md) keep one payment one detection. `dedupe_hash` and `status` stay unused: detections wait in an encrypted on-device queue, not as `pending_review` rows. |
 | **XP double-award** | `UNIQUE (user_id, dedupe_key)` on `gamification_events`. Replaying a captured request awards nothing. |
 | **Concurrent budget edits** | The same `updated_at` optimistic check as transactions. |
 | **Isolation level** | Default `READ COMMITTED` everywhere. The row locks and unique constraints above are sufficient; none of the RPCs perform a read-then-write that a unique index or `FOR UPDATE` does not already protect, so `SERIALIZABLE` and its retry loops are not needed. |
@@ -878,6 +878,8 @@ supabase/migrations/
   20260910121200_rpcs.sql
   20260910121300_rls_policies.sql
   20260910121400_audit_log.sql
+  20260910121500_gamification_awards.sql
+  20261004120000_transaction_origin.sql      ← 'notification' source; record_transaction_origin (M12)
 ```
 
 > **Why the signup trigger is not in the `profiles` migration.** `handle_new_user()` writes
