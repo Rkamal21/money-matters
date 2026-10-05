@@ -8,6 +8,30 @@ if a later milestone needs a migration on a core table, an assumption was wrong 
 
 Estimates assume 2–3 developers. They are sequencing information, not commitments.
 
+## Progress — audited 2026-10-06
+
+M0–M9 are built; M10, M11 and M12 are built in part; M13 is not started. A box is ticked only
+where a test, a lint rule, a constraint or a CI check shows the criterion holds. Some ticks rest
+on how the code is built, with no test of their own: the URL filters (M2), category-in-use (M3),
+editing September (M4), the widget states, widget isolation and widget registry (M7), and
+one-rule insights (M8). Those are worth a test before M10 closes. The audit's open items:
+
+| Milestone | Open                                                                                         |
+| --------- | -------------------------------------------------------------------------------------------- |
+| M0        | Merge blocking is a GitHub branch-protection setting, not in the repository                  |
+| M1        | No end-to-end test of password reset or of a skipped onboarding step                         |
+| M2        | No measurement of the 10-second entry; no test of keyset paging under inserts                |
+| M3        | No test that a split moves both categories' budgets                                          |
+| M4        | No test of two periods side by side, or of usage with a split and a refund together          |
+| M5        | Branch coverage of the calculation is 98%, not 100%; the money-in-`.tsx` lint is a heuristic |
+| M7        | No 3G paint measurement; the dashboard still makes plan, category and insight requests       |
+| M8        | The donut has no table fallback; widgets import the rules provider directly                  |
+| M9        | The XP history shows the latest 50 events, with no paging                                    |
+| M10–M13   | See each milestone: Play data safety, the SMS privacy test, and M10 as a whole               |
+
+The audit also found, and these are fixed: a goal's wallet whose opening balance could be edited
+(M6), money arithmetic in `BudgetPage.tsx` (M5), and a red `npm test` on a Windows clone (M0).
+
 ---
 
 ## Milestone 0 — Foundation
@@ -48,12 +72,14 @@ Two small things that have no other home and are cheapest here:
 works end to end.
 
 **Acceptance criteria**
-- [ ] `npm ci && npm run typecheck && npm run lint && npm test` is green on a clean clone
+- [x] `npm ci && npm run typecheck && npm run lint && npm test` is green on a clean clone
 - [ ] CI runs all eight jobs from [TESTING.md §8](./TESTING.md) and blocks merge on failure
-- [ ] A PR that puts `(income - fixed) / 30` in a component **fails lint**, not review
-- [ ] A PR that imports `supabase` into a component **fails lint**
-- [ ] `supabase db reset` works from zero and is documented in the README
-- [ ] No `RECEIVE_SMS` in the manifest; no v1 source in `src/`
+- [x] A PR that puts `(income - fixed) / 30` in a component **fails lint**, not review
+- [x] A PR that imports `supabase` into a component **fails lint**
+- [x] `supabase db reset` works from zero and is documented in the README
+- [x] No `RECEIVE_SMS` in the manifest; no v1 source in `src/` — *true at M0. Since 2026-10-04 the
+      manifest declares `RECEIVE_SMS` and `READ_SMS` for the built M12 feature, which is what this
+      criterion asked to wait for (ADR-0015, amended)*
 
 **Risks.** Over-configuring: two days of tooling is investment, a week is procrastination. Timebox
 to three days and ship it.
@@ -91,11 +117,11 @@ signup → confirm → onboarding → dashboard shell. Negative: unconfirmed use
 read B's profile.
 
 **Acceptance criteria**
-- [ ] A new user reaches an empty dashboard with 12 categories and a gamification profile
-- [ ] Session survives reload with **no** flash of the login screen (the v1 regression)
+- [x] A new user reaches an empty dashboard with 12 categories and a gamification profile
+- [x] Session survives reload with **no** flash of the login screen (the v1 regression)
 - [ ] Password reset works end to end against the local mail catcher
 - [ ] `onboarding_completed_at` gates the app; a skipped optional step still leaves it usable
-- [ ] Account deletion removes every row and the auth user
+- [x] Account deletion removes every row and the auth user
 
 **Risks.** Email deliverability in dev — use the local Supabase mail catcher, never a real inbox.
 
@@ -131,12 +157,12 @@ counter account, cross-user account reference (`23503`). Idempotency: the same
 test** — ₹10,000 Bank → Savings appears in neither income nor expenses, and both balances move.
 
 **Acceptance criteria**
-- [ ] A transfer never appears as income or expense anywhere in the product
-- [ ] Balances come from the view; no balance column exists
+- [x] A transfer never appears as income or expense anywhere in the product
+- [x] Balances come from the view; no balance column exists
 - [ ] Adding a transaction takes under 10 seconds on a phone, one-handed
-- [ ] Double-tapping submit creates one transaction
+- [x] Double-tapping submit creates one transaction
 - [ ] The list paginates by keyset and stays correct while rows are being inserted
-- [ ] Filters live in the URL; reload and the back button both behave
+- [x] Filters live in the URL; reload and the back button both behave
 
 **Risks.** Scope creep into splits/recurring/import. Ship the four kinds and stop.
 
@@ -162,11 +188,11 @@ beats system, higher specificity beats lower. No match returns `null`, never a g
 Splits: deferred constraint fires at commit; a split corrected within one transaction commits.
 
 **Acceptance criteria**
-- [ ] Typing "swiggy" suggests Food with visible confidence
-- [ ] Correcting a suggestion changes future suggestions for that merchant
+- [x] Typing "swiggy" suggests Food with visible confidence
+- [x] Correcting a suggestion changes future suggestions for that merchant
 - [ ] A split transaction's parts sum exactly to the parent; both categories' budgets update
-- [ ] A category in use cannot be deleted; archiving is offered instead
-- [ ] Categorisation logic is importable and testable with zero React
+- [x] A category in use cannot be deleted; archiving is offered instead
+- [x] Categorisation logic is importable and testable with zero React
 
 **Risks.** Over-investing in the rule engine. Twenty good rules beat a clever engine with three.
 
@@ -194,9 +220,9 @@ splits.
 
 **Acceptance criteria**
 - [ ] September and August budgets both exist and are independently correct
-- [ ] Editing September never alters August
-- [ ] A closed period cannot be edited but can be viewed
-- [ ] A user paid on the 25th gets a 25th → 24th period
+- [x] Editing September never alters August
+- [x] A closed period cannot be edited but can be viewed
+- [x] A user paid on the 25th gets a 25th → 24th period
 - [ ] Category usage matches the sum of that category's transactions, splits included, refunds netted
 
 **Risks.** Rollover semantics are a product decision as much as a technical one. Decide the
@@ -224,10 +250,10 @@ changes correctly after adding an expense.
 
 **Acceptance criteria**
 - [ ] 100% branch coverage on the calculation
-- [ ] Zero income shows "set up your budget", **not ₹0**
-- [ ] Overspending shows the amount over, not a negative limit
-- [ ] The limit changes when a transaction is added, and again the next day
-- [ ] A user can see exactly why the number is what it is
+- [x] Zero income shows "set up your budget", **not ₹0**
+- [x] Overspending shows the amount over, not a negative limit
+- [x] The limit changes when a transaction is added, and again the next day
+- [x] A user can see exactly why the number is what it is
 - [ ] Grep proves no arithmetic on money in any `.tsx` file
 
 **Risks.** The formula is a product decision. Ship the transparent version; measure whether users
@@ -261,11 +287,11 @@ cannot be re-pointed (`42501`); a wallet backing a goal cannot be retyped. Proje
 one inflow, negative rate, already reached, reached then spent.
 
 **Acceptance criteria**
-- [ ] A goal's progress always equals its wallet's balance — there is no second number to disagree
-- [ ] Nothing but a transaction on the wallet can change goal progress
-- [ ] Moving money to a goal changes neither income nor expense
-- [ ] Spending the goal's money on its purpose leaves the goal achieved
-- [ ] A projection with insufficient data says so rather than inventing a date
+- [x] A goal's progress always equals its wallet's balance — there is no second number to disagree
+- [x] Nothing but a transaction on the wallet can change goal progress
+- [x] Moving money to a goal changes neither income nor expense
+- [x] Spending the goal's money on its purpose leaves the goal achieved
+- [x] A projection with insufficient data says so rather than inventing a date
 
 **Risks.** One wallet per goal is the product constraint this design accepts. Watch for users who
 want two goals in one pot; the additive path is recorded in ADR-0026.
@@ -294,11 +320,11 @@ at 360 px. `axe` clean. Snapshot response validated by Zod. E2E: full dashboard 
 3G profile.
 
 **Acceptance criteria**
-- [ ] Every widget has loading, empty, error, and loaded states
-- [ ] One widget's failure degrades to an inline error; the rest render
+- [x] Every widget has loading, empty, error, and loaded states
+- [x] One widget's failure degrades to an inline error; the rest render
 - [ ] First contentful paint under 2 s on simulated 3G, mid-range Android
 - [ ] The dashboard is one round trip, not seven
-- [ ] Adding or reordering a widget is a config change
+- [x] Adding or reordering a widget is a config change
 
 **Risks.** The dashboard is where "just one small calculation here" creeps into components. The
 boundary lint rule is the defence; keep it enabled.
@@ -323,8 +349,8 @@ renormalisation when one component has insufficient data. Insight thresholds.
 
 **Acceptance criteria**
 - [ ] Every chart is keyboard-accessible and has a table fallback for screen readers
-- [ ] Insights never fabricate a number; insufficient history says so
-- [ ] Adding an insight is one new rule, not a new screen
+- [x] Insights never fabricate a number; insufficient history says so
+- [x] Adding an insight is one new rule, not a new screen
 - [ ] `InsightProvider` is the only interface the widget knows
 
 **Risks.** Insight quality is a product problem. Write ten and delete the six that are not useful,
@@ -354,11 +380,11 @@ writable by any client. Replaying `daily_check_in` awards nothing. Daily caps en
 gamification stops awards **server-side**. An achievement unlocks once and only once.
 
 **Acceptance criteria**
-- [ ] No client-callable path can grant XP
-- [ ] The streak survives a UTC/IST midnight boundary (the v1 regression)
+- [x] No client-callable path can grant XP
+- [x] The streak survives a UTC/IST midnight boundary (the v1 regression)
 - [ ] XP history explains every point the user has
-- [ ] Opting out hides every surface and stops the awards
-- [ ] Rewards weight outcomes over activity
+- [x] Opting out hides every surface and stops the awards
+- [x] Rewards weight outcomes over activity
 
 **Risks.** Tone. Review the copy as product, not as engineering. No confetti over a balance.
 
@@ -383,10 +409,10 @@ mobile. Full `axe` sweep plus a manual screen-reader pass.
 **Acceptance criteria**
 - [ ] Every threat in the model has a mitigation with a test asserting it
 - [ ] Dashboard p95 under 500 ms with 50,000 transactions
-- [ ] Initial bundle under 200 KB gzipped; charts and analytics lazy-loaded
+- [x] Initial bundle under 200 KB gzipped; charts and analytics lazy-loaded
 - [ ] Lighthouse accessibility 100 on the key routes
 - [ ] No unhandled promise rejection anywhere in the app
-- [ ] Sentry receives zero events containing an amount, an email, or a token (asserted by test)
+- [x] Sentry receives zero events containing an amount, an email, or a token (asserted by test)
 
 **Risks.** This milestone gets cut under deadline pressure. It is the one that must not be.
 
@@ -412,12 +438,12 @@ queued → replayed once on reconnect (**not twice** — the `client_request_id`
 never exits the app from a nested route.
 
 **Acceptance criteria**
-- [ ] The web bundle runs unmodified in the WebView
-- [ ] Hardware back navigates rather than closing the app
-- [ ] Session survives app restart
-- [ ] A transaction logged offline appears exactly once after reconnect
+- [x] The web bundle runs unmodified in the WebView
+- [x] Hardware back navigates rather than closing the app
+- [x] Session survives app restart
+- [x] A transaction logged offline appears exactly once after reconnect
 - [ ] Play Store data-safety declaration matches what the app actually collects
-- [ ] No feature file imports `@capacitor/*`
+- [x] No feature file imports `@capacitor/*`
 
 **Risks.** WebView performance on low-end devices — measure on a real ₹10,000 phone, not an
 emulator. Play Store review timelines are outside our control; submit early.
@@ -471,12 +497,12 @@ parse. Duplicate detection: exact and fuzzy. A privacy test asserting no log lin
 row contains the message body. Nothing uncertain reaches the ledger without an explicit user action.
 
 **Acceptance criteria**
-- [ ] The core web app works fully with the feature absent — no dependency in either direction
+- [x] The core web app works fully with the feature absent — no dependency in either direction
 - [ ] No message body is logged, stored, or transmitted, ever
-- [ ] Every uncertain ingested transaction requires explicit confirmation; a clear one is added
+- [x] Every uncertain ingested transaction requires explicit confirmation; a clear one is added
       automatically, with Undo and an off switch (ADR-0015, amended 2026-10-04)
-- [ ] Duplicates are flagged, not silently dropped
-- [ ] A transfer between the user's own accounts (a debit message plus a credit message) can be
+- [x] Duplicates are flagged, not silently dropped
+- [x] A transfer between the user's own accounts (a debit message plus a credit message) can be
       recorded once, as a transfer, rather than as an expense and an income
 - [ ] A malformed message is discarded without a crash and without a log
 - [ ] The app is fully usable if the SMS permission is denied
