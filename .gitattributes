@@ -1,0 +1,9 @@
+# Text files are LF in the repository and in every checkout, Windows included. With
+# core.autocrlf=true a Windows clone got CRLF, and src/platform/sms/nativeBundle.test.ts then
+# failed to load scripts/build-sms-parser.mjs ("Invalid or unexpected token"), so `npm test`
+# was red on a clean clone. Binary files are detected and left alone.
+* text=auto eol=lf
+
+# Windows runs these, and cmd.exe needs CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf

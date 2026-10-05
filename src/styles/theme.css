@@ -1,0 +1,251 @@
+/**
+ * Design tokens — ARCHITECTURE.md §F.5.
+ *
+ * Tailwind v4 generates a utility for every token here, so `--color-surface`
+ * is `bg-surface` and `--radius-lg` is `rounded-lg`. Components reference role
+ * tokens; no component contains a hex value.
+ *
+ * Two palettes share one set of names. The light palette is the `@theme`
+ * block; the dark palette — v1's minimalist dark-first look, carried forward
+ * as design reference (ARCHITECTURE.md, V1 audit) — overrides the same
+ * variables under `[data-theme='dark']`, and under the system preference when
+ * the user has not chosen. Both are measured by `theme.contrast.test.ts` and
+ * `theme.dark.contrast.test.ts`.
+ */
+
+@theme {
+  /* Typography — one family, weight does the work. Tabular figures for money. */
+  --font-sans:
+    'Inter var', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-numeric: 'Inter var', 'Inter', ui-sans-serif, system-ui, sans-serif;
+
+  /* Type scale (1.200 minor third) */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: 2.25rem; /* the one big number on a screen */
+
+  /* Spacing — 4px base */
+  --spacing: 0.25rem;
+
+  /* Radius — soft, not pill. Trustworthy, not toy. */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  /* Elevation — two levels only. Depth is a hierarchy signal, not decoration. */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.06);
+  --shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.12);
+
+  /* Semantic colour — never used raw; components reference role tokens.
+     §F.6 requires token pairs at >= 4.5:1 for text and >= 3:1 for UI. These are
+     measured, not estimated: `src/styles/theme.contrast.test.ts` parses this
+     file and fails the build on any pair below its threshold.
+
+       The base colours follow the Financy reference design (Figma, 2026-09-12):
+       ink #242424 on white cards over a light grey ground, one blue accent
+       (the reference's #377CC8, deepened to clear 4.5:1 as text), and ink for
+       primary actions. Every ratio is asserted by the test, not by this comment. */
+  --color-bg: #f3f4f6;
+  --color-surface: #ffffff;
+  /* Hover fills and progress tracks — a surface one step off the card. */
+  --color-surface-2: #eef1f5;
+  --color-text: #242424;
+  --color-text-muted: #5b6472;
+  --color-brand: #2b6cb0; /* one accent, used sparingly */
+  /* Primary actions are ink with white text, as in the reference. */
+  --color-brand-strong: #242424;
+  --color-on-brand: #ffffff;
+
+  /* Status colours. `positive` is deliberately much darker than `negative`
+     (contrast between the two: 1.57:1) rather than the more obvious mid-green.
+     A red-green colour-blind user cannot separate them by hue, so if they also
+     match in lightness — as the first draft's #0f7a4e did, at 1.10:1 — "under
+     budget" and "over budget" become the same swatch. Lightness is the channel
+     that still works.
+
+     `caution` and `negative` remain close in lightness (1.03:1); amber and red
+     that far apart in tone stop reading as a scale. They are separated by hue
+     and, per §F.5 rule 3, never by colour alone: every status carries an icon
+     and a word as well. */
+  --color-positive: #065234; /* income, under budget, goal met */
+  --color-caution: #8f5b00; /* approaching a limit */
+  --color-negative: #c02626; /* over budget, overspend */
+  /* The negative as a fill behind white text: destructive buttons. */
+  --color-negative-strong: #c02626;
+  --color-focus: #2b6cb0;
+
+  /* Two borders, because they answer to different rules.
+
+     `border` is decorative: card edges and list dividers, at 1.25:1 against the
+     surface. That is legal only because it is never the sole means of
+     identifying anything — a card is also separated by its background and its
+     spacing, so removing the line loses polish, not meaning.
+
+     `border-strong` is for anything whose boundary *is* the information: input
+     and select outlines, unchecked checkboxes, segmented controls. WCAG 1.4.11
+     applies there, so it clears 3:1 against both backgrounds. Reach for this
+     one on any interactive control (M1 onward); a hairline input border is the
+     classic way a design system fails an audit. */
+  --color-border: #e2e6eb;
+  --color-border-strong: #767c85;
+
+  /* Category colours. A category stores one of these names, never a hex value
+     (DATABASE.md §6.3). They tint icons and chart slices and are never the
+     only way a category is identified — its name is always shown. */
+  --color-cat-orange: #d9650b;
+  --color-cat-blue: #2f6fdf;
+  --color-cat-pink: #cf2f6e;
+  --color-cat-slate: #5b6778;
+  --color-cat-purple: #7c4ddb;
+  --color-cat-red: #d33a3a;
+  --color-cat-teal: #0e8f86;
+  --color-cat-sky: #0b86c2;
+  --color-cat-amber: #b7791f;
+  --color-cat-green: #178a4c;
+  --color-cat-emerald: #0a8a6a;
+  --color-cat-neutral: #6b7280;
+
+  /* Card edges. Lighter than `border`: the reference's cards are separated by
+     their white against the grey ground; the hairline only keeps them crisp. */
+  --color-card-border: #eceef1;
+
+  /* The inverse surface — the reference's dark balance card. Content on it
+     uses the `.theme-inverse` token set below, never ad-hoc colours. */
+  --color-inverse: #242424;
+
+  /* IDENTITY COLOURS — the reference's six brand hues, adapted.
+     Identity only: icon tiles, small accents, progress fills and decoration.
+     They never signal financial status; that stays with positive, caution
+     and negative. Never a solid card background by default.
+     The fills are deepened where the reference hue fell below 3:1 on a
+     card (lavender, yellow, pink); `id-lavender` and `id-yellow` keep the
+     original hues for decoration that carries no information. */
+  --color-id-blue: #377cc8;
+  --color-id-coral: #e0533d;
+  --color-id-teal: #469b88;
+  --color-id-violet: #6f79c4;
+  --color-id-gold: #a87d00;
+  --color-id-pink: #d2566f;
+  --color-id-lavender: #9da7d0;
+  --color-id-yellow: #eed868;
+}
+
+/* DARK PALETTE — the same names, measured by theme.dark.contrast.test.ts.
+   Applied when the user picks dark, and when they follow a dark system. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-bg: #0b0d10;
+  --color-surface: #14171b;
+  --color-surface-2: #1f2328;
+  --color-text: #f2f4f7;
+  --color-text-muted: #9ca3af;
+  --color-brand: #7aa2f7;
+  --color-brand-strong: #3566d6;
+  --color-on-brand: #ffffff;
+  --color-positive: #4ade80;
+  --color-caution: #fbbf24;
+  --color-negative: #f87171;
+  --color-negative-strong: #dc2626;
+  --color-focus: #7aa2f7;
+  --color-border: #2a2f36;
+  --color-border-strong: #6e7682;
+  --color-cat-orange: #fb923c;
+  --color-cat-blue: #60a5fa;
+  --color-cat-pink: #f472b6;
+  --color-cat-slate: #94a3b8;
+  --color-cat-purple: #a78bfa;
+  --color-cat-red: #f87171;
+  --color-cat-teal: #2dd4bf;
+  --color-cat-sky: #38bdf8;
+  --color-cat-amber: #fbbf24;
+  --color-cat-green: #4ade80;
+  --color-cat-emerald: #34d399;
+  --color-cat-neutral: #a3a3a3;
+  --color-card-border: #262b31;
+  --color-inverse: #1f242b;
+  --color-id-blue: #6aa8ea;
+  --color-id-coral: #f0806c;
+  --color-id-teal: #5cc0a8;
+  --color-id-violet: #a3abe3;
+  --color-id-gold: #e8c547;
+  --color-id-pink: #f09aac;
+  --color-id-lavender: #7d88b8;
+  --color-id-yellow: #d9c34f;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-overlay: 0 12px 32px rgb(0 0 0 / 0.55);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --color-bg: #0b0d10;
+    --color-surface: #14171b;
+    --color-surface-2: #1f2328;
+    --color-text: #f2f4f7;
+    --color-text-muted: #9ca3af;
+    --color-brand: #7aa2f7;
+    --color-brand-strong: #3566d6;
+    --color-on-brand: #ffffff;
+    --color-positive: #4ade80;
+    --color-caution: #fbbf24;
+    --color-negative: #f87171;
+    --color-negative-strong: #dc2626;
+    --color-focus: #7aa2f7;
+    --color-border: #2a2f36;
+    --color-border-strong: #6e7682;
+    --color-cat-orange: #fb923c;
+    --color-cat-blue: #60a5fa;
+    --color-cat-pink: #f472b6;
+    --color-cat-slate: #94a3b8;
+    --color-cat-purple: #a78bfa;
+    --color-cat-red: #f87171;
+    --color-cat-teal: #2dd4bf;
+    --color-cat-sky: #38bdf8;
+    --color-cat-amber: #fbbf24;
+    --color-cat-green: #4ade80;
+    --color-cat-emerald: #34d399;
+    --color-cat-neutral: #a3a3a3;
+    --color-card-border: #262b31;
+    --color-inverse: #1f242b;
+    --color-id-blue: #6aa8ea;
+    --color-id-coral: #f0806c;
+    --color-id-teal: #5cc0a8;
+    --color-id-violet: #a3abe3;
+    --color-id-gold: #e8c547;
+    --color-id-pink: #f09aac;
+    --color-id-lavender: #7d88b8;
+    --color-id-yellow: #d9c34f;
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-overlay: 0 12px 32px rgb(0 0 0 / 0.55);
+  }
+}
+
+/* INVERSE — content on the dark hero cards. One token set for both themes:
+   the card is dark in each (`--color-inverse`), so its text is light in each.
+   Utilities read `var(--color-*)`, so every component placed inside an
+   element with this class (money, status badges, links, disclosure panels)
+   picks up these values with no inverse-specific code.
+   Measured by theme.inverse.contrast.test.ts. */
+.theme-inverse {
+  --color-surface: var(--color-inverse);
+  --color-bg: #33373d;
+  --color-surface-2: #3a3f46;
+  --color-text: #ffffff;
+  --color-text-muted: #b9bec6;
+  --color-brand: #93b8f0;
+  --color-focus: #93b8f0;
+  --color-positive: #6ad394;
+  --color-caution: #f5c04a;
+  --color-negative: #ff9189;
+  --color-border: #41464e;
+  --color-border-strong: #8a919b;
+  --color-brand-strong: #ffffff;
+  --color-on-brand: #242424;
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}

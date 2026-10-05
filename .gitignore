@@ -12,6 +12,8 @@ dist
 dist-ssr
 *.local
 .env
+# Safe defaults for supabase/config.toml's env() values — no secrets (see the file itself).
+!supabase/.env
 
 # Editor directories and files
 .vscode/*
@@ -30,3 +32,12 @@ android/app/build/
 android/build/
 android/.gradle/
 .idea/
+
+# Test and build output
+coverage/
+playwright-report/
+test-results/
+
+# Supabase CLI local state
+supabase/.temp/
+supabase/.branches/

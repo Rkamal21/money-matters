@@ -1,0 +1,4 @@
+# The two checks that are cheap and catch the most: types and lint.
+# The full suite runs in CI (TESTING.md §8); a pre-push hook slow enough to
+# skip is a hook that gets skipped.
+npm run typecheck && npm run lint

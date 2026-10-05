@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    /* `node` is here for the test suites, which read process.env and talk to
+       Postgres. Application code must not: `no-restricted-syntax` bans
+       `process.env` and `import.meta.env` outside src/config/env.ts. */
+    "types": ["vite/client", "node"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@tests/*": ["./tests/*"]
+    }
+  },
+  "include": ["src", "tests"]
+}
