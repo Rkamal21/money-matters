@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
 import { env, IS_DEV } from '@/config/env'
+import { deviceAuthStorage } from '@/platform/storage/authStorage'
 
 import type { Database } from './database.types'
 
@@ -32,8 +33,13 @@ function supabaseUrl(): string {
   return url.toString().replace(/\/$/, '')
 }
 
+// Android keeps the session in app preferences, not WebView localStorage
+// (ARCHITECTURE.md §M.1). On the web this is undefined: supabase-js's default.
+const storage = deviceAuthStorage()
+
 export const supabase: Db = createClient<Database>(supabaseUrl(), env.VITE_SUPABASE_ANON_KEY, {
   auth: {
+    ...(storage === undefined ? {} : { storage }),
     persistSession: true,
     autoRefreshToken: true,
     // Email confirmation and password-reset links land back on the app with a

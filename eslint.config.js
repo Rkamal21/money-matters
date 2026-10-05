@@ -60,9 +60,16 @@ const POLICIES = [
     allow: { to: { element: { types: { anyOf: ['hooks', 'lib', 'config', 'types'] } } } },
   },
 
+  // data/ may use a platform/ port: the Supabase client keeps its session in
+  // device storage on Android (ARCHITECTURE.md §M.1). platform/ never imports
+  // data/, so this cannot form a cycle.
   {
     from: { element: { type: 'data' } },
-    allow: { to: { element: { types: { anyOf: ['data', 'domain', 'lib', 'config', 'types'] } } } },
+    allow: {
+      to: {
+        element: { types: { anyOf: ['data', 'domain', 'lib', 'platform', 'config', 'types'] } },
+      },
+    },
   },
 
   {
