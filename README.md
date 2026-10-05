@@ -10,27 +10,28 @@ to my goals_. Amounts are in ₹ (INR). Mobile-first web app, shipped to Android
 
 The product described in [docs/](./docs/ARCHITECTURE.md) is built and running end to end:
 
-| Area                  | What you can do                                                                                                                                                                           | Milestone  |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| **Auth**              | Sign up with email confirmation, sign in, reset and change password, sign out everywhere, delete your account                                                                             | M1         |
-| **Onboarding**        | Four steps — income and month start day, first account, savings target with an optional first goal, fixed costs                                                                           | M1         |
-| **Ledger**            | Accounts (bank, cash, savings, credit card, wallet) with derived balances; expenses, income, **transfers**, refunds; splits; edit, delete with undo; URL-driven filters and keyset paging | M2         |
-| **Categorisation**    | 12 editable categories (fixed / day-to-day / not counted), icons and colours; 56 merchant rules suggest a category as you type, and correcting one teaches a personal rule                | M3         |
-| **Budget**            | A plan per financial month with full history, category limits with pace markers, optional rollover, closed periods read-only                                                              | M4         |
-| **Safe daily limit**  | The hero number, with a "why this number?" breakdown, today's share, and honest states (no budget yet · over · period ended)                                                              | M5         |
-| **Goals**             | Each goal is the purpose of a wallet; add or withdraw money as transfers; required monthly saving; a projection that refuses to invent a date                                             | M6         |
-| **Dashboard**         | One round trip (`get_dashboard_snapshot`), nine widgets from a registry, each with its own error boundary                                                                                 | M7         |
-| **Insights**          | Income vs spending by month, 30-day spending, category changes against last period, financial health score, rule-based insights                                                           | M8         |
-| **Progress**          | Server-awarded XP with daily caps, streak check-in, ten achievements, full XP history — optional, off in one switch                                                                       | M9         |
-| **Android**           | The same app in a Capacitor 7 shell. Back closes an open sheet, then goes back a page, and only at the start leaves the app                                                               | M11 (part) |
-| **Automatic capture** | Android only, each source opt-in: bank SMS, payment-app notifications, a one-time 90-day inbox import. Clear payments are added on their own, with Undo; the rest wait for review         | M12        |
+| Area                  | What you can do                                                                                                                                                                                                                                                 | Milestone  |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| **Auth**              | Sign up with email confirmation, sign in, reset and change password, sign out everywhere, delete your account                                                                                                                                                   | M1         |
+| **Onboarding**        | Four steps — income and month start day, first account, savings target with an optional first goal, fixed costs                                                                                                                                                 | M1         |
+| **Ledger**            | Accounts (bank, cash, savings, credit card, wallet) with derived balances; expenses, income, **transfers**, refunds; splits; edit, delete with undo; URL-driven filters and keyset paging                                                                       | M2         |
+| **Categorisation**    | 12 editable categories (fixed / day-to-day / not counted), icons and colours; 56 merchant rules suggest a category as you type, and correcting one teaches a personal rule                                                                                      | M3         |
+| **Budget**            | A plan per financial month with full history, category limits with pace markers, optional rollover, closed periods read-only                                                                                                                                    | M4         |
+| **Safe daily limit**  | The hero number, with a "why this number?" breakdown, today's share, and honest states (no budget yet · over · period ended)                                                                                                                                    | M5         |
+| **Goals**             | Each goal is the purpose of a wallet; add or withdraw money as transfers; required monthly saving; a projection that refuses to invent a date                                                                                                                   | M6         |
+| **Dashboard**         | One round trip (`get_dashboard_snapshot`), nine widgets from a registry, each with its own error boundary                                                                                                                                                       | M7         |
+| **Insights**          | Income vs spending by month, 30-day spending, category changes against last period, financial health score, rule-based insights                                                                                                                                 | M8         |
+| **Progress**          | Server-awarded XP with daily caps, streak check-in, ten achievements, full XP history — optional, off in one switch                                                                                                                                             | M9         |
+| **Android**           | The same app in a Capacitor 7 shell. Back closes an open sheet, then goes back a page. The session is kept in app storage. With no signal, the last loaded data shows, marked as such, and new transactions are saved on the phone and added on reconnect, once | M11 (part) |
+| **Automatic capture** | Android only, each source opt-in: bank SMS, payment-app notifications, a one-time 90-day inbox import. Clear payments are added on their own, with Undo; the rest wait for review                                                                               | M12        |
 
 Light and dark themes (following the system by default), full keyboard and screen-reader support,
 and a 360 px-first layout with a bottom tab bar and a thumb-reach add button.
 
-**Not built yet:** hardening beyond what is below (M10); for Android (M11), native session storage,
-an offline queue for writes and a signed release; CSV / statement import (M12's fallback); AI
-insights (M13). See [docs/ROADMAP.md](./docs/ROADMAP.md).
+**Not built yet:** hardening beyond what is below (M10); a signed Android release (M11); CSV /
+statement import (M12's fallback); AI insights (M13). See [docs/ROADMAP.md](./docs/ROADMAP.md). On
+the web, a transaction saved offline waits in memory, so the tab has to stay open (SECURITY.md T20
+keeps financial data out of browser storage).
 
 **Not on the Play Store yet:** reading SMS needs Google's approval of a permissions declaration, and
 a release needs a hosted backend, a privacy policy and a Data safety form. What is left is listed in
@@ -40,13 +41,13 @@ a release needs a hosted backend, a privacy policy and a Data safety form. What 
 
 | Suite                                                                                                          | Count            | Runs against               |
 | -------------------------------------------------------------------------------------------------------------- | ---------------- | -------------------------- |
-| Unit — the financial domain (with fast-check property tests), the message parser, lint rules, palette contrast | 701              | nothing (pure)             |
+| Unit — the financial domain (with fast-check property tests), the message parser, lint rules, palette contrast | 741              | nothing (pure)             |
 | Component — the app shell, the MSW harness, Back handling, reviewing a detected payment                        | 35               | jsdom + MSW                |
-| Integration — schema assertions, the RLS isolation matrix, ledger invariants, detection origin                 | 137              | local Supabase             |
-| E2E — the critical journey, axe on every key page, security journeys                                           | 22 × 2 viewports | built app + local Supabase |
+| Integration — schema assertions, the RLS isolation matrix, ledger invariants, detection origin                 | 138              | local Supabase             |
+| E2E — the critical journey, axe on every key page, security journeys, saving offline                           | 23 × 2 viewports | built app + local Supabase |
 | Android — sender allow-list and payment-app list (JVM)                                                         | 11               | Gradle `testDebugUnitTest` |
 
-Initial JS load: ~191 KB gzipped (budget 200 KB); every page and the Sentry SDK are lazy chunks.
+Initial JS load: ~193 KB gzipped (budget 200 KB); every page and the Sentry SDK are lazy chunks.
 
 ---
 
@@ -259,6 +260,24 @@ purity, no Supabase outside `data/`, no money arithmetic in components) and test
 directory `dist`, and the `VITE_*` variables from `.env.example` configured per environment.
 Nothing there is a secret — see [`src/config/README.md`](./src/config/README.md) for why the anon
 key is on the public list and a `service_role` key can never be.
+
+[`vercel.json`](./vercel.json) holds the rest: the single-page fallback (every path serves
+`index.html`, so `/goals/…` survives a reload), long-lived caching for the hashed files in
+`/assets`, and the security headers. The main one is the Content-Security-Policy that SECURITY.md
+T8 and T9 rely on: scripts only from the site itself, never inline, and connections only to
+`*.supabase.co` and Sentry's ingest. The whole E2E suite passes under this policy, served with the
+local Supabase in `connect-src`, with no violations reported. The policy is in HTTP headers, so it
+covers the website, not the Android app, which loads its files from the device.
+
+**First deployment** (needs your accounts; nothing here is automated):
+
+1. Create a Supabase project, then `npx supabase link --project-ref <ref>` and `npx supabase db push`
+   (see _Deploying the database_ above), and match the auth settings to `supabase/config.toml`.
+2. Import the GitHub repository into Vercel; it reads `vercel.json`. Set `VITE_SUPABASE_URL` and
+   `VITE_SUPABASE_ANON_KEY` from the project's API settings for Production and Preview, plus
+   `VITE_SENTRY_DSN` if you use Sentry.
+3. Add the Vercel domain to the Supabase project's auth redirect allow-list, so confirmation and
+   password-reset links come back to the app.
 
 ---
 
