@@ -183,6 +183,12 @@ export const CONSTRAINT_MAP: Readonly<Record<string, Mapping>> = {
     message: 'The institution name is too long.',
     field: 'institution',
   },
+  accounts_goal_wallet_opening_fixed: {
+    code: 'account.goal_wallet_balance',
+    message:
+      'This wallet holds a goal, so its balance changes only by adding or withdrawing money on the goal.',
+    field: 'openingBalance',
+  },
   // categories
   categories_name_check: {
     code: 'category.name_invalid',
@@ -308,6 +314,7 @@ const RAISED_MESSAGE_MAP: Readonly<Record<string, string>> = {
   'a split needs at least two parts': 'tx_split_min_parts',
   'split parts must sum to the transaction amount': 'tx_split_total_matches',
   'system categories cannot be deleted; archive it instead': 'categories_system_not_deletable',
+  "a goal's wallet changes only through transactions": 'accounts_goal_wallet_opening_fixed',
 }
 
 /** When a delete trips a foreign key, the problem is "in use", whichever key it was. */

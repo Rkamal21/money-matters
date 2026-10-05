@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { calculateAvailable } from '@/domain/budget/calculateSafeDailyLimit'
 import { fromMinor, subtract, zero } from '@/domain/money/Money'
 import { netVariable } from '@/domain/transactions/PeriodSummary'
+import { mapDataError } from '@/data/supabase/mapErrors'
 
 import { adminClient, createUser, deleteUser, seedLedger, type TestUser } from './clients'
 import { connect } from './db'
@@ -370,6 +371,52 @@ describe('goals over wallets (ROADMAP.md M6)', () => {
     )
     expect(results.every((result) => result.error === null)).toBe(true)
     expect(await balance(ids.walletId)).toBe(before + 20 * 1_111)
+  })
+
+  it('only a transaction moves a goal: its wallet’s opening balance cannot be edited', async () => {
+    const wallet = (name: string) =>
+      user.client
+        .from('accounts')
+        .insert({
+          user_id: user.id,
+          name: `${name} ${randomUUID().slice(0, 6)}`,
+          type: 'wallet',
+          opening_balance_minor: 10_000,
+        })
+        .select('id')
+        .single()
+    const backing = ((await wallet('Bike')).data as { id: string }).id
+    const free = ((await wallet('Spare')).data as { id: string }).id
+    await user.client
+      .from('goals')
+      .insert({ user_id: user.id, wallet_account_id: backing, name: 'Bike', target_minor: 50_000 })
+
+    // Raising it would complete the goal with no money moving (ADR-0026).
+    const edit = await user.client
+      .from('accounts')
+      .update({ opening_balance_minor: 50_000 })
+      .eq('id', backing)
+    expect(edit.error?.code).toBe('23514')
+    expect(mapDataError(edit.error, { entity: 'account' }).code).toBe('account.goal_wallet_balance')
+    expect(await balance(backing)).toBe(10_000)
+
+    // Everything else about the wallet can still change, and so can a wallet with no goal.
+    const rename = await user.client
+      .from('accounts')
+      .update({ name: 'Bike fund' })
+      .eq('id', backing)
+    expect(rename.error).toBeNull()
+    const same = await user.client
+      .from('accounts')
+      .update({ opening_balance_minor: 10_000 })
+      .eq('id', backing)
+    expect(same.error).toBeNull()
+    const correction = await user.client
+      .from('accounts')
+      .update({ opening_balance_minor: 25_000 })
+      .eq('id', free)
+    expect(correction.error).toBeNull()
+    expect(await balance(free)).toBe(25_000)
   })
 
   it('reached is sticky: spending the money on its purpose does not un-achieve the goal', async () => {
