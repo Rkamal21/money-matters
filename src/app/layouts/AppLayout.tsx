@@ -23,9 +23,15 @@ import { useProfile } from '@/data/queries'
 import { cn } from '@/lib/cn'
 import { useTheme } from '@/lib/theme'
 
+import { OfflineBanner } from '../OfflineBanner'
+
 // Its own chunk: the Capacitor runtime stays out of the initial bundle (ARCHITECTURE.md §L).
 const DetectionListener = lazy(async () => ({
   default: (await import('@/features/transactions/detection/DetectionListener')).DetectionListener,
+}))
+// Transactions saved offline, written when the connection is back (ARCHITECTURE.md §M.2).
+const OutboxSync = lazy(async () => ({
+  default: (await import('@/features/transactions/outbox/OutboxSync')).OutboxSync,
 }))
 
 /**
@@ -175,6 +181,10 @@ export function AppLayout() {
           tabIndex={-1}
           className="mx-auto w-full max-w-5xl flex-1 px-4 pt-2 pb-28 sm:px-6 lg:pt-8 lg:pb-12"
         >
+          <OfflineBanner />
+          <Suspense fallback={null}>
+            <OutboxSync />
+          </Suspense>
           <ErrorBoundary resetKey={location.pathname} title="This page could not be shown">
             <Outlet />
           </ErrorBoundary>

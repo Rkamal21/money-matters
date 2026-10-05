@@ -37,34 +37,70 @@ function merchantFrom(input: SaveInput): string | null {
   return input.suggestion?.merchantLabel ?? null
 }
 
-export async function saveTransaction(input: SaveInput, deps: Deps): Promise<Transaction> {
-  const isSplit = input.kind !== 'transfer' && input.splits !== null && input.splits.length >= 2
-  const directCategory =
-    input.kind === 'transfer'
-      ? null
-      : isSplit
-        ? (input.splits?.[0]?.categoryId ?? null)
-        : input.categoryId
+function isSplitInput(input: SaveInput): boolean {
+  return input.kind !== 'transfer' && input.splits !== null && input.splits.length >= 2
+}
 
-  let saved: Transaction
+function directCategoryOf(input: SaveInput): string | null {
+  if (input.kind === 'transfer') return null
+  return isSplitInput(input) ? (input.splits?.[0]?.categoryId ?? null) : input.categoryId
+}
 
-  if (input.existing === null) {
-    const create: NewTransaction = {
+/**
+ * Everything a new transaction's writes need, and nothing else — what the
+ * offline outbox keeps when the network is down, so a replay writes exactly
+ * what the submit would have.
+ */
+export interface CreateRequest {
+  readonly userId: string
+  readonly transaction: NewTransaction
+  /** Two or more parts, or null for an unsplit transaction. */
+  readonly splits: readonly SplitPart[] | null
+}
+
+export function createRequestOf(input: SaveInput): CreateRequest {
+  return {
+    userId: input.userId,
+    transaction: {
       kind: input.kind,
       amount: input.amount,
       accountId: input.accountId,
       counterAccountId: input.kind === 'transfer' ? input.counterAccountId : null,
-      categoryId: directCategory,
+      categoryId: directCategoryOf(input),
       merchantLabel: merchantFrom(input),
       description: input.description,
       notes: input.notes,
       occurredOn: input.occurredOn,
       clientRequestId: input.clientRequestId,
-    }
-    saved = await deps.transactions.create(input.userId, create)
-    if (isSplit && input.splits !== null && !saved.isSplit) {
-      await deps.transactions.replaceSplits(saved.id, input.splits)
-    }
+    },
+    splits: isSplitInput(input) ? input.splits : null,
+  }
+}
+
+/**
+ * The writes of a create: one INSERT, idempotent on `clientRequestId`, then the
+ * parts. Safe to run again — a repeat returns the row already saved, and a row
+ * that already has its parts is not split twice.
+ */
+export async function writeCreate(
+  request: CreateRequest,
+  deps: Pick<Repositories, 'transactions'>,
+): Promise<Transaction> {
+  const saved = await deps.transactions.create(request.userId, request.transaction)
+  if (request.splits !== null && !saved.isSplit) {
+    await deps.transactions.replaceSplits(saved.id, request.splits)
+  }
+  return saved
+}
+
+export async function saveTransaction(input: SaveInput, deps: Deps): Promise<Transaction> {
+  const isSplit = isSplitInput(input)
+  const directCategory = directCategoryOf(input)
+
+  let saved: Transaction
+
+  if (input.existing === null) {
+    saved = await writeCreate(createRequestOf(input), deps)
   } else {
     const existing = input.existing
     const amountChanged = !moneyEquals(existing.amount, input.amount)

@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router'
 import { ToastProvider } from '@/components/ui/Toast'
 
 import { AuthProvider } from './providers/AuthProvider'
+import { QueryPersistence } from './providers/QueryPersistence'
 import { QueryProvider } from './providers/QueryProvider'
 import { ThemeProvider } from './providers/ThemeProvider'
 import { RouteAnnouncer } from './RouteAnnouncer'
@@ -28,6 +29,7 @@ export function AppProviders({
   return (
     <QueryProvider {...(queryClient === undefined ? {} : { client: queryClient })}>
       <AuthProvider>
+        <QueryPersistence />
         <ThemeProvider>
           <ToastProvider>{children}</ToastProvider>
         </ThemeProvider>

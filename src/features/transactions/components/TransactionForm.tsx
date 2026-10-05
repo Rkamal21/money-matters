@@ -36,7 +36,8 @@ import { newRequestId, toMoney } from '@/lib/forms'
 import { queryKeys } from '@/lib/queryKeys'
 
 import { transactionSchema, type TransactionFormValues } from '../schemas/transaction.schema'
-import { saveTransaction } from '../services/saveTransaction'
+import { outbox } from '../outbox/outbox'
+import { saveOrQueue } from '../services/saveOrQueue'
 
 /**
  * The product's highest-traffic surface (ROADMAP.md M2): an expense in under
@@ -222,8 +223,11 @@ export function TransactionForm({
       : null
 
   const save = useMutation({
+    // Runs with no connection too: a new transaction then goes to the outbox
+    // rather than waiting, paused, with a spinner (ARCHITECTURE.md §M.2).
+    networkMode: 'always',
     mutationFn: (values: TransactionFormValues) =>
-      saveTransaction(
+      saveOrQueue(
         {
           userId,
           existing,
@@ -247,15 +251,27 @@ export function TransactionForm({
           categories,
         },
         repositories,
+        outbox,
+        Date.now,
       ),
-    onSuccess: async (_saved, values) => {
+    onSuccess: async (outcome, values) => {
       setServerError(null)
       rememberAccount(values.accountId)
-      await Promise.all([
-        invalidateLedger(),
-        queryClient.invalidateQueries({ queryKey: queryKeys.merchantRules() }),
-      ])
-      toast.show({ tone: 'success', title: existing === null ? 'Saved' : 'Changes saved' })
+      if (outcome.status === 'queued') {
+        toast.show({
+          tone: 'info',
+          title: 'Saved on this device',
+          body: outcome.durable
+            ? 'You are offline. It will be added when you are back online.'
+            : 'You are offline. It will be added when you are back online — keep this tab open.',
+        })
+      } else {
+        await Promise.all([
+          invalidateLedger(),
+          queryClient.invalidateQueries({ queryKey: queryKeys.merchantRules() }),
+        ])
+        toast.show({ tone: 'success', title: existing === null ? 'Saved' : 'Changes saved' })
+      }
       if (addAnother && existing === null) {
         setRequestId(newRequestId())
         setCategoryTouched(false)

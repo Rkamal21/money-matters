@@ -37,11 +37,13 @@
   },
   "dependencies": {
     "@capacitor/app": "^7.1.2",
+    "@capacitor/preferences": "^7.0.4",
     "@hookform/resolvers": "^5.9.1",
     "@radix-ui/react-dialog": "^1.1.23",
     "@sentry/react": "^8.55.0",
     "@supabase/supabase-js": "^2.97.0",
     "@tanstack/react-query": "^5.102.8",
+    "@tanstack/react-query-persist-client": "^5.102.8",
     "lucide-react": "^1.45.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

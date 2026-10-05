@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { onlineManager, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { type ReactNode, useState } from 'react'
 
 import { toAppError } from '@/lib/errors'
@@ -31,6 +31,11 @@ export function QueryProvider({
   readonly children: ReactNode
   readonly client?: QueryClient
 }) {
-  const [queryClient] = useState(() => client ?? createQueryClient())
+  const [queryClient] = useState(() => {
+    // TanStack assumes "online" until the first online/offline event; a start
+    // with no connection should look offline from the first render.
+    onlineManager.setOnline(navigator.onLine)
+    return client ?? createQueryClient()
+  })
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
 }

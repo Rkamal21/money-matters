@@ -1072,6 +1072,25 @@ What we do build, in Milestone 11:
 Because writes already go through repositories, the outbox slots in beneath them without touching a
 single feature.
 
+**As built (2026-10-06).** Three things differ from the plan above, each for a reason:
+
+- **The outbox sits beside the entry form, not beneath the repositories.** A queued write has no
+  row yet, so `create` cannot return one, and the form's Undo needs a row's id. `saveOrQueue`
+  (`features/transactions/services/`) returns `saved` or `queued`, and the form says which. Only
+  **new** transactions are queued; an edit or delete with no connection fails as before, because
+  replaying an edit later could overwrite a change made elsewhere. A replay goes through the same
+  `writeCreate` as the form. An entry the server refuses for a reason a retry cannot fix stays on
+  screen with the reason and a Discard button; it is never retried silently.
+- **Where things are kept follows SECURITY.md T20.** On Android the outbox and the read cache live
+  in the app's private preferences (`platform/storage/deviceStore`). On the web nothing financial
+  goes to browser storage: the outbox is in memory, so the page asks for the tab to stay open, and
+  there is no persisted cache. The session follows the M.1 table: preferences on Android,
+  localStorage on the web, as before.
+- **The read cache belongs to one user.** Query keys carry no user id, so the stored copy is tagged
+  with its user and deleted instead of restored for anyone else, and deleted at sign-out. A
+  `bigint`-aware serializer (`lib/storedJson`) keeps `Money` exact. "Clearly marked" is the offline
+  banner: *You are offline. Showing what this device last loaded, at …*
+
 ### M.3 Future SMS ingestion — the extension architecture
 
 **Not built at MVP.** Gated on a Google Play policy answer ([ADR-0015](./adr/0015-sms-ingestion-policy-gated.md), risk R5).
