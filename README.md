@@ -6,39 +6,47 @@ to my goals_. Amounts are in ₹ (INR). Mobile-first web app, shipped to Android
 
 ---
 
-## Status: the MVP (Milestones 1–7), plus analytics and gamification (8–9)
+## Status: the MVP (Milestones 1–7), analytics and gamification (8–9), automatic capture on Android (12)
 
 The product described in [docs/](./docs/ARCHITECTURE.md) is built and running end to end:
 
-| Area                 | What you can do                                                                                                                                                                           | Milestone |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| **Auth**             | Sign up with email confirmation, sign in, reset and change password, sign out everywhere, delete your account                                                                             | M1        |
-| **Onboarding**       | Four steps — income and month start day, first account, savings target with an optional first goal, fixed costs                                                                           | M1        |
-| **Ledger**           | Accounts (bank, cash, savings, credit card, wallet) with derived balances; expenses, income, **transfers**, refunds; splits; edit, delete with undo; URL-driven filters and keyset paging | M2        |
-| **Categorisation**   | 12 editable categories (fixed / day-to-day / not counted), icons and colours; 56 merchant rules suggest a category as you type, and correcting one teaches a personal rule                | M3        |
-| **Budget**           | A plan per financial month with full history, category limits with pace markers, optional rollover, closed periods read-only                                                              | M4        |
-| **Safe daily limit** | The hero number, with a "why this number?" breakdown, today's share, and honest states (no budget yet · over · period ended)                                                              | M5        |
-| **Goals**            | Each goal is the purpose of a wallet; add or withdraw money as transfers; required monthly saving; a projection that refuses to invent a date                                             | M6        |
-| **Dashboard**        | One round trip (`get_dashboard_snapshot`), nine widgets from a registry, each with its own error boundary                                                                                 | M7        |
-| **Insights**         | Income vs spending by month, 30-day spending, category changes against last period, financial health score, rule-based insights                                                           | M8        |
-| **Progress**         | Server-awarded XP with daily caps, streak check-in, ten achievements, full XP history — optional, off in one switch                                                                       | M9        |
+| Area                  | What you can do                                                                                                                                                                           | Milestone  |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| **Auth**              | Sign up with email confirmation, sign in, reset and change password, sign out everywhere, delete your account                                                                             | M1         |
+| **Onboarding**        | Four steps — income and month start day, first account, savings target with an optional first goal, fixed costs                                                                           | M1         |
+| **Ledger**            | Accounts (bank, cash, savings, credit card, wallet) with derived balances; expenses, income, **transfers**, refunds; splits; edit, delete with undo; URL-driven filters and keyset paging | M2         |
+| **Categorisation**    | 12 editable categories (fixed / day-to-day / not counted), icons and colours; 56 merchant rules suggest a category as you type, and correcting one teaches a personal rule                | M3         |
+| **Budget**            | A plan per financial month with full history, category limits with pace markers, optional rollover, closed periods read-only                                                              | M4         |
+| **Safe daily limit**  | The hero number, with a "why this number?" breakdown, today's share, and honest states (no budget yet · over · period ended)                                                              | M5         |
+| **Goals**             | Each goal is the purpose of a wallet; add or withdraw money as transfers; required monthly saving; a projection that refuses to invent a date                                             | M6         |
+| **Dashboard**         | One round trip (`get_dashboard_snapshot`), nine widgets from a registry, each with its own error boundary                                                                                 | M7         |
+| **Insights**          | Income vs spending by month, 30-day spending, category changes against last period, financial health score, rule-based insights                                                           | M8         |
+| **Progress**          | Server-awarded XP with daily caps, streak check-in, ten achievements, full XP history — optional, off in one switch                                                                       | M9         |
+| **Android**           | The same app in a Capacitor 7 shell. Back closes an open sheet, then goes back a page, and only at the start leaves the app                                                               | M11 (part) |
+| **Automatic capture** | Android only, each source opt-in: bank SMS, payment-app notifications, a one-time 90-day inbox import. Clear payments are added on their own, with Undo; the rest wait for review         | M12        |
 
 Light and dark themes (following the system by default), full keyboard and screen-reader support,
 and a 360 px-first layout with a bottom tab bar and a thumb-reach add button.
 
-**Not built yet:** hardening beyond what is below (M10), the Android build (M11), SMS / CSV import
-(M12), AI insights (M13). See [docs/ROADMAP.md](./docs/ROADMAP.md).
+**Not built yet:** hardening beyond what is below (M10); for Android (M11), native session storage,
+an offline queue for writes and a signed release; CSV / statement import (M12's fallback); AI
+insights (M13). See [docs/ROADMAP.md](./docs/ROADMAP.md).
+
+**Not on the Play Store yet:** reading SMS needs Google's approval of a permissions declaration, and
+a release needs a hosted backend, a privacy policy and a Data safety form. What is left is listed in
+[docs/SMS-CAPTURE.md](./docs/SMS-CAPTURE.md#google-play).
 
 ### How it is checked
 
-| Suite                                                                                           | Count            | Runs against               |
-| ----------------------------------------------------------------------------------------------- | ---------------- | -------------------------- |
-| Unit — the financial domain (with fast-check property tests), lint-rule tests, palette contrast | 322              | nothing (pure)             |
-| Component — the app shell and the MSW harness                                                   | 7                | jsdom + MSW                |
-| Integration — schema assertions, the RLS isolation matrix, ledger invariants                    | 122              | local Supabase             |
-| E2E — the critical journey, axe on every key page, security journeys                            | 22 × 2 viewports | built app + local Supabase |
+| Suite                                                                                                          | Count            | Runs against               |
+| -------------------------------------------------------------------------------------------------------------- | ---------------- | -------------------------- |
+| Unit — the financial domain (with fast-check property tests), the message parser, lint rules, palette contrast | 701              | nothing (pure)             |
+| Component — the app shell, the MSW harness, Back handling, reviewing a detected payment                        | 35               | jsdom + MSW                |
+| Integration — schema assertions, the RLS isolation matrix, ledger invariants, detection origin                 | 137              | local Supabase             |
+| E2E — the critical journey, axe on every key page, security journeys                                           | 22 × 2 viewports | built app + local Supabase |
+| Android — sender allow-list and payment-app list (JVM)                                                         | 11               | Gradle `testDebugUnitTest` |
 
-Initial JS load: ~186 KB gzipped (budget 200 KB); every page and the Sentry SDK are lazy chunks.
+Initial JS load: ~191 KB gzipped (budget 200 KB); every page and the Sentry SDK are lazy chunks.
 
 ---
 
