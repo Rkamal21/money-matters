@@ -35,6 +35,7 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@capacitor/app": "^7.1.2",
     "@hookform/resolvers": "^5.9.1",
     "@radix-ui/react-dialog": "^1.1.23",
     "@sentry/react": "^8.55.0",

@@ -1,5 +1,5 @@
 import { Plus, Target } from 'lucide-react'
-import { Link, useSearchParams } from 'react-router'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
 
 import { Button } from '@/components/ui/Button'
 import { Card, CARD_CLASS } from '@/components/ui/Card'
@@ -24,7 +24,18 @@ export function GoalsPage() {
   const today = useToday()
   const { currency, locale } = usePreferences()
   const [params, setParams] = useSearchParams()
+  const location = useLocation()
+  const navigate = useNavigate()
   const creating = params.get('new') === '1'
+  // Opening adds a history entry, so closing goes back to remove it — the X,
+  // Escape, the browser and Android's Back all leave one /goals entry behind.
+  // Opened from a link straight to ?new=1, there is nothing to go back to.
+  const openedHere = Boolean((location.state as { sheet?: unknown } | null)?.sheet)
+  const openCreate = () => setParams({ new: '1' }, { state: { sheet: true } })
+  const closeCreate = () => {
+    if (openedHere) void navigate(-1)
+    else setParams({}, { replace: true })
+  }
 
   const all = goals.data ?? []
   const active = all.filter((goal) => goal.archivedAt === null)
@@ -43,10 +54,7 @@ export function GoalsPage() {
             Money with a purpose. Each goal is backed by its own wallet.
           </p>
         </div>
-        <Button
-          icon={<Plus aria-hidden="true" className="size-4" />}
-          onClick={() => setParams({ new: '1' })}
-        >
+        <Button icon={<Plus aria-hidden="true" className="size-4" />} onClick={openCreate}>
           New goal
         </Button>
       </header>
@@ -66,7 +74,7 @@ export function GoalsPage() {
             icon={<Target className="size-6" />}
             title="No goals yet"
             body="An emergency fund, a laptop, a trip. Give money a purpose and watch the wallet fill."
-            action={<Button onClick={() => setParams({ new: '1' })}>Create your first goal</Button>}
+            action={<Button onClick={openCreate}>Create your first goal</Button>}
           />
         </Card>
       ) : (
@@ -98,7 +106,7 @@ export function GoalsPage() {
       {today !== null && (
         <CreateGoalSheet
           open={creating}
-          onClose={() => setParams({})}
+          onClose={closeCreate}
           wallets={freeWallets}
           currency={currency}
           today={today}

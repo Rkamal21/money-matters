@@ -9,6 +9,7 @@ import { QueryProvider } from './providers/QueryProvider'
 import { ThemeProvider } from './providers/ThemeProvider'
 import { RouteAnnouncer } from './RouteAnnouncer'
 import { AppRoutes } from './router'
+import { SystemBackHandler } from './SystemBackHandler'
 
 /**
  * The composition root. Wires everything, owns nothing (ARCHITECTURE.md §F.1).
@@ -40,6 +41,7 @@ export function App() {
     <AppProviders>
       <BrowserRouter>
         <RouteAnnouncer />
+        <SystemBackHandler />
         <AppRoutes />
       </BrowserRouter>
     </AppProviders>
