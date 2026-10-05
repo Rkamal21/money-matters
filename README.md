@@ -279,6 +279,30 @@ covers the website, not the Android app, which loads its files from the device.
 3. Add the Vercel domain to the Supabase project's auth redirect allow-list, so confirmation and
    password-reset links come back to the app.
 
+### Android release build
+
+A Play release is an app bundle signed with your upload key, built against the hosted Supabase:
+
+1. Create the upload key once and keep it safe; losing it means asking Google to reset it:
+   `keytool -genkeypair -keystore money-matters-upload.jks -alias upload -keyalg RSA -keysize 2048 -validity 10000`
+   (keytool ships with Android Studio, in `jbr/bin`).
+2. Write `android/keystore.properties` (gitignored, like every `*.jks` and `*.keystore`):
+   ```properties
+   storeFile=C:/path/to/money-matters-upload.jks
+   storePassword=…
+   keyAlias=upload
+   keyPassword=…
+   ```
+3. Put the hosted values in `.env.production.local` (gitignored). It outranks `.env.local`, which
+   points at the local stack and would otherwise be built into the release.
+4. `npm run cap:sync`, then `cd android && ./gradlew bundleRelease` (Android Studio's JDK as
+   `JAVA_HOME`). The bundle is `android/app/build/outputs/bundle/release/app-release.aab`. Raise
+   `versionCode` in `android/app/build.gradle` for every upload.
+
+Without `keystore.properties`, release builds come out unsigned and nothing else changes. Before the
+first upload, see [docs/SMS-CAPTURE.md § Google Play](./docs/SMS-CAPTURE.md#google-play): the SMS
+permissions need an approved declaration first.
+
 ---
 
 _Money Matters_ — one place to track spending, hit goals, and see where your money goes.
