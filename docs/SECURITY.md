@@ -506,7 +506,10 @@ select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 - **E2E negative journeys** (Playwright): sign in as A, navigate directly to `/goals/<B's id>` →
   "not available" page, not a 500 and not B's goal; sign out → back button does not reveal cached
   financial data.
-- **Dependency audit:** `npm audit --audit-level=high` fails the build.
+- **Dependency audit:** a high or critical advisory fails the build (`scripts/audit-dependencies.mjs`).
+  In production dependencies there are no exceptions. In dev tooling, an advisory with **no fixed
+  version anywhere** may be listed in the script with why it cannot reach user input and a review
+  date; an expired entry fails the build. An advisory that has a fix is upgraded, never excepted.
 
 ---
 

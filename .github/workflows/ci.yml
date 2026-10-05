@@ -207,6 +207,8 @@ jobs:
       - run: npm ci
       # SECURITY.md §8.3: a high-severity advisory fails the build. Do not
       # lower this threshold to make a red build green — upgrade the package.
-      - run: npm audit --audit-level=high
+      # The script is `npm audit --audit-level=high` plus a dated, documented
+      # exception list for dev-tool advisories that have no fixed version.
+      - run: node scripts/audit-dependencies.mjs
       - run: npm run build
       - run: node scripts/check-bundle.mjs

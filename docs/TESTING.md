@@ -299,7 +299,7 @@ PR opened
   │                       → schema assertions → integration + RLS     (~3m)
   ├─ e2e                  playwright (sharded ×3)                     (~4m)
   ├─ a11y                 axe over key routes                         (~1m)
-  └─ security             npm audit --audit-level=high
+  └─ security             npm audit, high+ fails (scripts/audit-dependencies.mjs)
                           bundle scan for service_role / stray keys   (~30s)
 
 All green + 1 approval (2 for migrations, RLS, or domain/money) → squash merge to main
