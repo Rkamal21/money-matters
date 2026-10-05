@@ -1,5 +1,5 @@
-import type { Money } from '../money/Money'
-import type { BudgetPeriod } from '../period/BudgetPeriod'
+import { divideFloor, isPositive, type Money } from '../money/Money'
+import { type BudgetPeriod, daysInPeriod } from '../period/BudgetPeriod'
 
 /**
  * One period's plan — a row of `budget_periods` (DATABASE.md §6.6).
@@ -29,4 +29,14 @@ export interface CategoryLimit {
 
 export function isClosed(plan: Pick<BudgetPlan, 'closedAt'>): boolean {
   return plan.closedAt !== null
+}
+
+/**
+ * What the plan leaves for each day of its period, spread evenly and rounded
+ * down: the "a day" figure on the budget page's plan card. `null` when nothing
+ * is available, because nothing (or less) is not a daily amount.
+ */
+export function planPerDay(available: Money, period: BudgetPeriod): Money | null {
+  if (!isPositive(available)) return null
+  return divideFloor(available, BigInt(daysInPeriod(period))).quotient
 }

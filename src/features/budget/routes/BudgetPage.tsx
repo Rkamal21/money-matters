@@ -29,7 +29,7 @@ import {
   useToday,
 } from '@/data/queries'
 import { repositories } from '@/data/repositories'
-import type { BudgetPlan } from '@/domain/budget/BudgetPlan'
+import { type BudgetPlan, planPerDay } from '@/domain/budget/BudgetPlan'
 import {
   calculateCategoryUsages,
   calculateOverallBudgetUsage,
@@ -37,10 +37,9 @@ import {
 } from '@/domain/budget/calculateBudgetUsage'
 import { calculateAvailable } from '@/domain/budget/calculateSafeDailyLimit'
 import type { AppError } from '@/domain/errors/AppError'
-import { divideFloor, type Money as MoneyValue, toMajorString, zero } from '@/domain/money/Money'
+import { type Money as MoneyValue, toMajorString, zero } from '@/domain/money/Money'
 import {
   type BudgetPeriod,
-  daysInPeriod,
   formatPeriodLabel,
   nextPeriod,
   previousPeriod,
@@ -349,10 +348,7 @@ function PlanCard({
         upcomingPlanned: zero(currency),
       }).available
     : null
-  const perDayPlan =
-    available !== null && available.minor > 0n
-      ? divideFloor(available, BigInt(daysInPeriod(plan.period))).quotient
-      : null
+  const perDayPlan = available === null ? null : planPerDay(available, plan.period)
   const spent = summary ? netSpending(summary) : null
 
   return (
